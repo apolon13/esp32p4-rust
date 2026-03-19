@@ -1,0 +1,19 @@
+# Minimal config for ESP32-P4 hello world
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Rust needs more stack than C
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# Halt on panic instead of reboot (so we can see the error)
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
+
+# Disable watchdog to eliminate false triggers
+CONFIG_ESP_TASK_WDT_EN=n
+
+# No PSRAM for now (simplify boot)
+CONFIG_SPIRAM=n
+
+# Chip revision v1.x (our chip is v1.3)
+CONFIG_ESP32P4_REV_MIN_100=y
