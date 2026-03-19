@@ -1,0 +1,16 @@
+[build]
+target = "riscv32imafc-esp-espidf"
+
+[target.'cfg(target_os = "espidf")']
+linker = "ldproxy"
+runner = "espflash flash --no-stub --monitor"
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+MCU = "esp32p4"
+ESP_IDF_VERSION = "v5.4.3"
+ESP_IDF_TOOLS_INSTALL_DIR = "global"
+IDF_PATH = { value = "/Users/antonpankov/.espressif/esp-idf/v5.4.3", force = true }
