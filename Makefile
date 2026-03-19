@@ -13,9 +13,37 @@ PARTITION  = $(IDF_BUILD)/partition_table/partition-table.bin
 
 export IDF_PATH := /Users/antonpankov/.espressif/esp-idf/v5.4.3
 
-.PHONY: build image flash monitor flash-monitor clean
+# ── Component cache invalidation ────────────────────────────────────────────
+# When any local C component source changes, only that component's cmake
+# artifacts are deleted so ninja recompiles it without a full reconfigure
+# (which would require network access to download remote components).
+#
+# Add new component headers/sources here as they are created.
+C_COMPONENT_SRCS = \
+	components/display_init/display_init.c \
+	components/display_init/include/display_init.h
 
-build:
+COMP_STAMP = target/.idf_component_stamp
+
+$(COMP_STAMP): $(C_COMPONENT_SRCS)
+	@mkdir -p target
+	@echo "[make] C components changed — invalidating cmake component cache"
+	@for profile in debug release; do \
+		for d in target/$(TARGET)/$$profile/build/esp-idf-sys-*/out/build/esp-idf/display_init; do \
+			rm -rf $$d 2>/dev/null || true; \
+		done; \
+		for d in target/$(TARGET)/$$profile/.fingerprint/esp-idf-sys-*; do \
+			rm -rf $$d 2>/dev/null || true; \
+		done; \
+	done
+	@touch build.rs
+	@touch $@
+
+# ── Targets ─────────────────────────────────────────────────────────────────
+
+.PHONY: build image flash monitor flash-monitor flash-release clean
+
+build: $(COMP_STAMP)
 	cargo build
 
 image: build
@@ -41,5 +69,10 @@ monitor:
 
 flash-monitor: flash monitor
 
+flash-release: $(COMP_STAMP)
+	cargo build --release
+	$(MAKE) flash PROFILE=release
+
 clean:
 	cargo clean
+	rm -f target/.idf_component_stamp

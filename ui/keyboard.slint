@@ -1,0 +1,147 @@
+// On-screen virtual keyboard for embedded touch UI
+
+struct KeyDef {
+    lo: string,  // normal label
+    hi: string,  // shifted label
+}
+
+component Key {
+    in property <string> label;
+    in property <length>  key-width:  54px;
+    in property <length>  key-height: 40px;
+    in property <bool>    accent:     false;
+    callback pressed(string);
+
+    width:  key-width;
+    height: key-height;
+
+    ta := TouchArea {
+        clicked => { root.pressed(root.label); }
+    }
+    bg := Rectangle {
+        background:    accent
+                           ? (ta.pressed ? #388bfd : #1f6feb)
+                           : (ta.pressed ? #2d333b : #21262d);
+        border-radius: 5px;
+        border-width:  1px;
+        border-color:  #30363d;
+    }
+    Text {
+        text:               label;
+        color:              #e6edf3;
+        font-size:          15px;
+        horizontal-alignment: center;
+        vertical-alignment:   center;
+    }
+}
+
+component KeyRow {
+    in property <[KeyDef]> keys;
+    in property <bool>     shift: false;
+    callback pressed(string);
+
+    HorizontalLayout {
+        spacing:   3px;
+        alignment: center;
+        for k in keys: Key {
+            label: shift ? k.hi : k.lo;
+            pressed(v) => { root.pressed(v); }
+        }
+    }
+}
+
+export component VirtualKeyboard {
+    in-out property <string> value;
+    in-out property <bool>   shift: false;
+    callback done();
+    callback delete-last();  // string slicing unsupported in Slint — handled by Rust
+
+    height: 228px;
+
+    VerticalLayout {
+        spacing: 3px;
+
+        // ── Row 0: digits ────────────────────────────────────────────
+        KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"1",hi:"!"},{lo:"2",hi:"@"},{lo:"3",hi:"#"},
+                {lo:"4",hi:"$"},{lo:"5",hi:"%"},{lo:"6",hi:"^"},
+                {lo:"7",hi:"&"},{lo:"8",hi:"*"},{lo:"9",hi:"("},
+                {lo:"0",hi:")"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+
+        // ── Row 1: QWERTYUIOP ────────────────────────────────────────
+        KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"q",hi:"Q"},{lo:"w",hi:"W"},{lo:"e",hi:"E"},
+                {lo:"r",hi:"R"},{lo:"t",hi:"T"},{lo:"y",hi:"Y"},
+                {lo:"u",hi:"U"},{lo:"i",hi:"I"},{lo:"o",hi:"O"},
+                {lo:"p",hi:"P"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+
+        // ── Row 2: ASDFGHJKL- ─────────────────────────────────────────
+        KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"a",hi:"A"},{lo:"s",hi:"S"},{lo:"d",hi:"D"},
+                {lo:"f",hi:"F"},{lo:"g",hi:"G"},{lo:"h",hi:"H"},
+                {lo:"j",hi:"J"},{lo:"k",hi:"K"},{lo:"l",hi:"L"},
+                {lo:"-",hi:"_"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+
+        // ── Row 3: ZXCVBNM.@ ─────────────────────────────────────────
+        KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"z",hi:"Z"},{lo:"x",hi:"X"},{lo:"c",hi:"C"},
+                {lo:"v",hi:"V"},{lo:"b",hi:"B"},{lo:"n",hi:"N"},
+                {lo:"m",hi:"M"},{lo:".",hi:":"},{lo:"@",hi:"+"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+
+        // ── Row 4: Shift / Space / Backspace ─────────────────────────
+        HorizontalLayout {
+            spacing:   3px;
+            alignment: center;
+
+            Key {
+                label:      shift ? "SHF*" : "SHF";
+                key-width:  70px;
+                accent:     root.shift;
+                pressed(_) => { root.shift = !root.shift; }
+            }
+            Key {
+                label:     " ";
+                key-width: 280px;
+                pressed(_) => { root.value += " "; }
+            }
+            Key {
+                label:     "DEL";
+                key-width: 70px;
+                accent:    true;
+                pressed(_) => { root.delete-last(); }
+            }
+        }
+
+        // ── Row 5: Done ───────────────────────────────────────────────
+        HorizontalLayout {
+            alignment: center;
+            Key {
+                label:      "ГОТОВО";
+                key-width:  430px;
+                key-height: 40px;
+                accent:     true;
+                pressed(_) => { root.done(); }
+            }
+        }
+    }
+}

@@ -1,0 +1,44 @@
+// JC1060P470C_I_W_Y — 7" IPS 1024×600  |  Security Control Centre
+import { WifiScreen, NetworkInfo } from "wifi_screen.slint";
+
+export { NetworkInfo }
+
+export component AppWindow inherits Window {
+    width:      1024px;
+    height:      600px;
+    background: #0d1117;
+
+    // WiFi state — driven from Rust
+    in-out property <[NetworkInfo]> wifi-networks;
+    in-out property <int>           wifi-selected-index: -1;
+    in-out property <string>        wifi-status: "Инициализация Wi-Fi...";
+    in-out property <string>        wifi-password;
+    in-out property <bool>          wifi-ready: false;
+    in-out property <bool>          wifi-scanning: false;
+    in-out property <bool>          wifi-connecting: false;
+    in-out property <bool>          wifi-is-connected: false;
+    in-out property <string>        wifi-connected-ssid: "";
+
+    callback wifi-scan-requested();
+    callback wifi-connect-requested(string, string);
+    callback wifi-cancel-connect();
+    callback wifi-password-delete-last();
+
+    WifiScreen {
+        width:           parent.width;
+        height:          parent.height;
+        networks <=>     root.wifi-networks;
+        selected-index <=> root.wifi-selected-index;
+        status <=>       root.wifi-status;
+        password <=>     root.wifi-password;
+        ready <=>        root.wifi-ready;
+        scanning <=>     root.wifi-scanning;
+        connecting <=>   root.wifi-connecting;
+        is-connected <=> root.wifi-is-connected;
+        connected-ssid <=> root.wifi-connected-ssid;
+        scan-requested           => { root.wifi-scan-requested(); }
+        connect-requested(ssid, pwd) => { root.wifi-connect-requested(ssid, pwd); }
+        cancel-connect           => { root.wifi-cancel-connect(); }
+        password-delete-last     => { root.wifi-password-delete-last(); }
+    }
+}

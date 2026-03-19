@@ -18,6 +18,30 @@ opt-level = "z"
 [dependencies]
 log = "0.4"
 esp-idf-svc = { version = "0.52.1", features = ["critical-section"] }
+slint = { version = "1", default-features = false, features = [
+    "compat-1-2",
+    "unsafe-single-threaded",
+    "libm",
+    "renderer-software",
+] }
+
+# Раскомментируйте для подключения SPI-дисплея (ST7789 / ILI9341):
+# esp-idf-hal          = { version = "0.45", features = ["critical-section"] }
+# mipidsi              = "0.8"
+# display-interface-spi = "0.5"
+# embedded-graphics    = "0.8"
 
 [build-dependencies]
 embuild = "0.33"
+slint-build = "1"
+
+# Local C components: JD9165 display driver, display init, GT911 touch
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components"]
+
+# Remote component: WiFi remote (ESP32-P4 companion chip WiFi via esp_hosted)
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_wifi_remote", version = "*" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_hosted", version = "*" }

@@ -1,19 +1,57 @@
-# Minimal config for ESP32-P4 hello world
+# JC1060P470C_I_W_Y board — ESP32-P4 + JD9165 7" 1024×600 MIPI-DSI
+
 CONFIG_IDF_TARGET="esp32p4"
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
-# Rust needs more stack than C
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+# PSRAM is required for the 1024×600 RGB565 framebuffer (~1.2 MB)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
-# Halt on panic instead of reboot (so we can see the error)
+# Larger stack for Rust + Slint
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=65536
+
+# Halt on panic so we can read the log
 CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
 
-# Disable watchdog to eliminate false triggers
+# Disable watchdog to avoid false triggers during first build
 CONFIG_ESP_TASK_WDT_EN=n
-
-# No PSRAM for now (simplify boot)
-CONFIG_SPIRAM=n
 
 # Chip revision v1.x (our chip is v1.3)
 CONFIG_ESP32P4_REV_MIN_100=y
+
+# Higher FreeRTOS tick rate for smoother UI
+CONFIG_FREERTOS_HZ=1000
+
+# IDF experimental features needed for MIPI-DSI
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# Custom partition table (factory 8MB to fit Slint + esp_hosted binary)
+# Absolute path required: IDF cmake resolves relative paths to out/ not project root
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="/Users/antonpankov/RustroverProjects/security/partitions.csv"
+
+# WiFi via ESP32-C6 companion chip (SDIO interface)
+# esp_hosted + esp_wifi_remote components required (see idf_component.yml)
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_IDF_SLAVE_TARGET="esp32c6"
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=40000
+CONFIG_ESP_HOSTED_SDIO_PIN_CLK=18
+CONFIG_ESP_HOSTED_SDIO_PIN_CMD=19
+CONFIG_ESP_HOSTED_SDIO_PIN_D0=14
+CONFIG_ESP_HOSTED_SDIO_PIN_D1=15
+CONFIG_ESP_HOSTED_SDIO_PIN_D2=16
+CONFIG_ESP_HOSTED_SDIO_PIN_D3=17
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54
+CONFIG_ESP_HOSTED_SDIO_RESET_DELAY_MS=1500
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP=y
+CONFIG_ESP_WIFI_REMOTE_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
