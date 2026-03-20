@@ -62,7 +62,7 @@ component ProgressBar {
 // ── Password field ────────────────────────────────────────────────────────────
 component PasswordField {
     in property <string> value;
-    in property <bool>   focused: false;
+    in property <bool>   active: false;
     callback tapped();
 
     height: 48px;
@@ -71,12 +71,11 @@ component PasswordField {
         background:    #0d1117;
         border-radius: 8px;
         border-width:  1px;
-        border-color:  focused ? #1f6feb : #30363d;
+        border-color:  active ? #1f6feb : #30363d;
 
         HorizontalLayout {
             padding-left:  14px;
             padding-right: 14px;
-            spacing:        6px;
 
             Text {
                 text:               value == "" ? "Введите пароль..." : value;
@@ -84,20 +83,6 @@ component PasswordField {
                 font-size:          16px;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
-            }
-
-            if focused: Rectangle {
-                width:      2px;
-                height:     26px;
-                background: #1f6feb;
-                property <bool> blink: false;
-                opacity: blink ? 0.0 : 1.0;
-                animate opacity { duration: 500ms; easing: linear; }
-                Timer {
-                    interval: 500ms;
-                    running:  true;
-                    triggered => { parent.blink = !parent.blink; }
-                }
             }
         }
     }
@@ -107,9 +92,8 @@ component PasswordField {
 
 // ── Network card ──────────────────────────────────────────────────────────────
 // TouchArea is the LAST (topmost) child so it reliably receives pointer events.
-// Critically: NetworkCard is placed directly in a plain Rectangle, never inside
-// a Flickable — this eliminates the tap-vs-scroll disambiguation that caused
-// missed taps in the old list.
+// Cards live inside a Flickable for vertical scrolling; the 30 px drag
+// threshold in the touch controller prevents jitter from triggering scroll.
 component NetworkCard {
     in property <NetworkInfo> data;
     callback clicked();
@@ -172,6 +156,7 @@ export component WifiScreen {
     in-out property <bool>          connecting: false;
     in-out property <bool>          is-connected: false;
     in-out property <string>        connected-ssid: "";
+    in-out property <string>        connected-ip: "";
 
     callback scan-requested();
     callback connect-requested(string, string);
@@ -179,19 +164,52 @@ export component WifiScreen {
     callback password-delete-last();
 
     property <bool> keyboard-visible: false;
+    property <bool> show-form: root.selected-index >= 0;
+    property <length> ptr-h: 50px;
+    property <bool> ptr-inited: false;
+    property <bool> scan-was-active: false;
 
     CyrillicCoverage {}
 
-    // ══════════════════════════════════════════════════════════════
-    // PAGE 1 — Network grid  (selected-index < 0)
-    // ══════════════════════════════════════════════════════════════
-    // NOTE: `visible` instead of `if` — both pages stay in the Slint scene
-    // graph at all times. `if` removes/creates elements which can confuse
-    // SwappedBuffers dirty-region tracking and leave stale content in the
-    // back-buffer, causing the old screen to flash over the new one.
+    // Pull-to-refresh viewport management
+    Timer {
+        interval: 10ms;
+        running: !root.ptr-inited;
+        triggered => {
+            grid-flick.viewport-y = -root.ptr-h;
+            root.ptr-inited = true;
+        }
+    }
+
+    Timer {
+        interval: 100ms;
+        running: root.ptr-inited;
+        triggered => {
+            if root.scan-was-active && !root.scanning {
+                grid-flick.viewport-y = -root.ptr-h;
+            }
+            root.scan-was-active = root.scanning;
+            if !root.scanning && root.ready && !root.connecting && !root.show-form {
+                if grid-flick.viewport-y > -(root.ptr-h / 3) {
+                    root.scanning = true;
+                    root.scan-requested();
+                }
+            }
+        }
+    }
+
     Rectangle {
-        visible:    root.selected-index < 0;
-        background: #0d1117;
+        clip: true;
+
+        // ══════════════════════════════════════════════════════════════
+        // PAGE 1 — Network grid  (selected-index < 0)
+        // ══════════════════════════════════════════════════════════════
+        Rectangle {
+            x: root.show-form ? -parent.width : 0px;
+            width: parent.width;
+            height: parent.height;
+            background: #0d1117;
+            animate x { duration: 250ms; easing: ease-in-out; }
 
         // ── Header ────────────────────────────────────────────────
         Rectangle {
@@ -215,19 +233,31 @@ export component WifiScreen {
 
                 if root.is-connected: Rectangle {
                     width:         200px;
-                    height:        34px;
+                    height:        46px;
                     background:    #0d2818;
                     border-radius: 6px;
                     border-width:  1px;
                     border-color:  #238636;
 
-                    Text {
-                        text:                 "● " + root.connected-ssid;
-                        color:                #3fb950;
-                        font-size:            13px;
-                        horizontal-alignment: center;
-                        vertical-alignment:   center;
-                        overflow:             elide;
+                    VerticalLayout {
+                        alignment: center;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 2px;
+
+                        Text {
+                            text:                 "● " + root.connected-ssid;
+                            color:                #3fb950;
+                            font-size:            12px;
+                            horizontal-alignment: center;
+                            overflow:             elide;
+                        }
+                        if root.connected-ip != "": Text {
+                            text:                 root.connected-ip;
+                            color:                #7ee787;
+                            font-size:            10px;
+                            horizontal-alignment: center;
+                        }
                     }
                 }
 
@@ -296,27 +326,75 @@ export component WifiScreen {
             }
         }
 
-        // ── Network card grid ──────────────────────────────────────
-        // Cards are placed with absolute x/y calculated from their index.
-        // No Flickable — each card's TouchArea works without disambiguation.
-        // Shows up to ~15 networks (5 rows × 3 cols) in the 500px area.
+        // ── Scrollable network card grid ─────────────────────────────
         Rectangle {
             y:          59px;
             height:     root.height - 59px - 40px;
             background: #0d1117;
             clip:       true;
 
-            // Empty state
+            // Scrollable card grid (behind overlays)
+            grid-flick := Flickable {
+                interactive: !root.scanning && root.ready && !root.connecting;
+                viewport-width:  self.width;
+                property <length> pad:    12px;
+                property <length> gap:    10px;
+                property <length> card-w: (self.width - pad * 2 - gap * 2) / 3;
+                property <length> card-h: 90px;
+                property <int>    num-rows: root.networks.length > 0
+                    ? floor((root.networks.length - 1) / 3) + 1
+                    : 0;
+                property <length> grid-h: num-rows > 0
+                    ? num-rows * (card-h + gap) - gap + pad * 2
+                    : 0px;
+
+                viewport-height: root.ptr-h
+                    + (grid-h > self.height ? grid-h : self.height);
+
+                Rectangle {
+                    y: 0;
+                    height: root.ptr-h;
+                    width: parent.viewport-width;
+
+                    Text {
+                        text: root.scanning ? "Обновление..." : "↓ Обновить";
+                        color: #484f58;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                for net[idx] in root.networks: NetworkCard {
+                    data:   net;
+                    x:      mod(idx, 3) * (card-w + gap) + pad;
+                    y:      root.ptr-h + floor(idx / 3) * (card-h + gap) + pad;
+                    width:  card-w;
+                    height: card-h;
+                    clicked => {
+                        if net.secured {
+                            root.selected-index   = idx;
+                            root.password         = "";
+                            root.keyboard-visible = false;
+                        } else {
+                            root.connect-requested(net.ssid, "");
+                        }
+                    }
+                }
+            }
+
+            // Empty state (drawn on top of Flickable)
             if root.networks.length == 0 && !root.scanning: Text {
-                text:                 root.ready ? "Нажмите Сканировать"
+                text:                 root.connecting ? "Автоподключение..."
+                                                 : root.ready ? "Нажмите Сканировать"
                                                  : "Инициализация Wi-Fi...";
-                color:                #484f58;
+                color:                root.connecting ? #58a6ff : #484f58;
                 font-size:            14px;
                 horizontal-alignment: center;
                 vertical-alignment:   center;
             }
 
-            // Scanning overlay
+            // Scanning overlay (drawn on top of Flickable)
             if root.scanning: VerticalLayout {
                 alignment: center;
                 spacing:   16px;
@@ -352,36 +430,18 @@ export component WifiScreen {
                     }
                 }
             }
-
-            // Grid: 3 columns, cards positioned by index arithmetic.
-            // mod(idx, 3)  → column 0/1/2
-            // floor(idx/3) → row    0/1/2/…  (idx/3 is float in Slint)
-            property <length> pad:    12px;
-            property <length> gap:    10px;
-            property <length> card-w: (self.width - pad * 2 - gap * 2) / 3;
-            property <length> card-h: 90px;
-
-            for net[idx] in root.networks: NetworkCard {
-                data:   net;
-                x:      mod(idx, 3) * (card-w + gap) + pad;
-                y:      floor(idx / 3) * (card-h + gap) + pad;
-                width:  card-w;
-                height: card-h;
-                clicked => {
-                    root.selected-index   = idx;
-                    root.password         = "";
-                    root.keyboard-visible = false;
-                }
-            }
         }
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // PAGE 2 — Connection form  (selected-index >= 0)
-    // ══════════════════════════════════════════════════════════════
-    Rectangle {
-        visible:    root.selected-index >= 0;
-        background: #0d1117;
+        // ══════════════════════════════════════════════════════════════
+        // PAGE 2 — Connection form  (selected-index >= 0)
+        // ══════════════════════════════════════════════════════════════
+        Rectangle {
+            x: root.show-form ? 0px : parent.width;
+            width: parent.width;
+            height: parent.height;
+            background: #0d1117;
+            animate x { duration: 250ms; easing: ease-in-out; }
 
         // ── Header with back button ────────────────────────────────
         Rectangle {
@@ -428,9 +488,11 @@ export component WifiScreen {
                 }
 
                 if root.is-connected: Text {
-                    text:               "● " + root.connected-ssid;
+                    text:               root.connected-ip != ""
+                                            ? "● " + root.connected-ssid + " • " + root.connected-ip
+                                            : "● " + root.connected-ssid;
                     color:              #3fb950;
-                    font-size:          13px;
+                    font-size:          12px;
                     vertical-alignment: center;
                 }
             }
@@ -532,8 +594,8 @@ export component WifiScreen {
                 }
 
                 PasswordField {
-                    value:   root.password;
-                    focused: root.keyboard-visible;
+                    value:  root.password;
+                    active: root.keyboard-visible;
                     tapped => { root.keyboard-visible = !root.keyboard-visible; }
                 }
 
@@ -596,5 +658,6 @@ export component WifiScreen {
                 }
             }
         }
+    }
     }
 }

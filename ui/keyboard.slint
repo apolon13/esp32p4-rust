@@ -7,12 +7,11 @@ struct KeyDef {
 
 component Key {
     in property <string> label;
-    in property <length>  key-width:  54px;
     in property <length>  key-height: 40px;
     in property <bool>    accent:     false;
     callback pressed(string);
 
-    width:  key-width;
+    horizontal-stretch: 1;
     height: key-height;
 
     ta := TouchArea {
@@ -41,8 +40,7 @@ component KeyRow {
     callback pressed(string);
 
     HorizontalLayout {
-        spacing:   3px;
-        alignment: center;
+        spacing: 3px;
         for k in keys: Key {
             label: shift ? k.hi : k.lo;
             pressed(v) => { root.pressed(v); }
@@ -110,34 +108,31 @@ export component VirtualKeyboard {
 
         // ── Row 4: Shift / Space / Backspace ─────────────────────────
         HorizontalLayout {
-            spacing:   3px;
-            alignment: center;
+            spacing: 3px;
 
             Key {
-                label:      shift ? "SHF*" : "SHF";
-                key-width:  70px;
-                accent:     root.shift;
+                label:              shift ? "SHF*" : "SHF";
+                horizontal-stretch: 1;
+                accent:             root.shift;
                 pressed(_) => { root.shift = !root.shift; }
             }
             Key {
-                label:     " ";
-                key-width: 280px;
+                label:              " ";
+                horizontal-stretch: 4;
                 pressed(_) => { root.value += " "; }
             }
             Key {
-                label:     "DEL";
-                key-width: 70px;
-                accent:    true;
+                label:              "DEL";
+                horizontal-stretch: 1;
+                accent:             true;
                 pressed(_) => { root.delete-last(); }
             }
         }
 
         // ── Row 5: Done ───────────────────────────────────────────────
         HorizontalLayout {
-            alignment: center;
             Key {
                 label:      "ГОТОВО";
-                key-width:  430px;
                 key-height: 40px;
                 accent:     true;
                 pressed(_) => { root.done(); }

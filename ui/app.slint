@@ -8,6 +8,8 @@ export component AppWindow inherits Window {
     height:      600px;
     background: #0d1117;
 
+    property <int> current-screen: 0;
+
     // WiFi state — driven from Rust
     in-out property <[NetworkInfo]> wifi-networks;
     in-out property <int>           wifi-selected-index: -1;
@@ -18,27 +20,73 @@ export component AppWindow inherits Window {
     in-out property <bool>          wifi-connecting: false;
     in-out property <bool>          wifi-is-connected: false;
     in-out property <string>        wifi-connected-ssid: "";
+    in-out property <string>        wifi-connected-ip: "";
 
     callback wifi-scan-requested();
     callback wifi-connect-requested(string, string);
     callback wifi-cancel-connect();
     callback wifi-password-delete-last();
 
-    WifiScreen {
-        width:           parent.width;
-        height:          parent.height;
-        networks <=>     root.wifi-networks;
-        selected-index <=> root.wifi-selected-index;
-        status <=>       root.wifi-status;
-        password <=>     root.wifi-password;
-        ready <=>        root.wifi-ready;
-        scanning <=>     root.wifi-scanning;
-        connecting <=>   root.wifi-connecting;
-        is-connected <=> root.wifi-is-connected;
-        connected-ssid <=> root.wifi-connected-ssid;
-        scan-requested           => { root.wifi-scan-requested(); }
-        connect-requested(ssid, pwd) => { root.wifi-connect-requested(ssid, pwd); }
-        cancel-connect           => { root.wifi-cancel-connect(); }
-        password-delete-last     => { root.wifi-password-delete-last(); }
+    HorizontalLayout {
+        // ── Sidebar ──────────────────────────────────────────────
+        Rectangle {
+            width: 56px;
+            background: #010409;
+            border-width: 0;
+
+            Rectangle {
+                x: 55px;
+                width: 1px;
+                background: #21262d;
+            }
+
+            VerticalLayout {
+                padding: 6px;
+                spacing: 4px;
+                alignment: start;
+
+                Rectangle {
+                    height: 44px;
+                    background: root.current-screen == 0 ? #1c2128 : transparent;
+                    border-radius: 8px;
+
+                    Text {
+                        text: "WiFi";
+                        font-size: 11px;
+                        color: root.current-screen == 0 ? #58a6ff : #484f58;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        clicked => { root.current-screen = 0; }
+                    }
+                }
+            }
+        }
+
+        // ── Content area ─────────────────────────────────────────
+        Rectangle {
+            horizontal-stretch: 1;
+
+            WifiScreen {
+                width:           parent.width;
+                height:          parent.height;
+                networks <=>     root.wifi-networks;
+                selected-index <=> root.wifi-selected-index;
+                status <=>       root.wifi-status;
+                password <=>     root.wifi-password;
+                ready <=>        root.wifi-ready;
+                scanning <=>     root.wifi-scanning;
+                connecting <=>   root.wifi-connecting;
+                is-connected <=> root.wifi-is-connected;
+                connected-ssid <=> root.wifi-connected-ssid;
+                connected-ip   <=> root.wifi-connected-ip;
+                scan-requested           => { root.wifi-scan-requested(); }
+                connect-requested(ssid, pwd) => { root.wifi-connect-requested(ssid, pwd); }
+                cancel-connect           => { root.wifi-cancel-connect(); }
+                password-delete-last     => { root.wifi-password-delete-last(); }
+            }
+        }
     }
 }

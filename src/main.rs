@@ -38,6 +38,10 @@ fn main() {
     // ── Backlight on ──────────────────────────────────────────────
     display.backlight_on();
 
+    unsafe {
+        esp_idf_svc::sys::esp_task_wdt_add(core::ptr::null_mut());
+    }
+
     // ── Render loop (Core 0) ──────────────────────────────────────
     //
     // RepaintBufferType::SwappedBuffers: Slint internally accumulates dirty
@@ -67,6 +71,7 @@ fn main() {
                 slint::platform::update_timers_and_animations();
             }
         }
+        unsafe { esp_idf_svc::sys::esp_task_wdt_reset(); }
     }
 }
 

@@ -18,7 +18,8 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=65536
 CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
 
 # Disable watchdog to avoid false triggers during first build
-CONFIG_ESP_TASK_WDT_EN=n
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 
 # Chip revision v1.x (our chip is v1.3)
 CONFIG_ESP32P4_REV_MIN_100=y

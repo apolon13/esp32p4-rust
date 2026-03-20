@@ -99,14 +99,21 @@ impl WifiScreenHandler {
                     app.set_wifi_scanning(false);
                 }
                 WifiEvent::Connecting { ssid, attempt, max } => {
+                    app.set_wifi_connecting(true);
                     app.set_wifi_status(
                         format!("Подключение к {ssid} ({attempt}/{max})...").into(),
                     );
                 }
-                WifiEvent::Connected { ssid } => {
-                    app.set_wifi_status(format!("Подключено: {ssid}").into());
+                WifiEvent::Connected { ssid, ip } => {
+                    let status = if ip.is_empty() {
+                        format!("Подключено: {ssid}")
+                    } else {
+                        format!("Подключено: {ssid} • {ip}")
+                    };
+                    app.set_wifi_status(status.into());
                     app.set_wifi_is_connected(true);
                     app.set_wifi_connected_ssid(ssid.as_str().into());
+                    app.set_wifi_connected_ip(ip.as_str().into());
                     app.set_wifi_connecting(false);
                 }
                 WifiEvent::ConnectError(e) => {
@@ -117,10 +124,13 @@ impl WifiScreenHandler {
                     };
                     app.set_wifi_status(msg.into());
                     app.set_wifi_is_connected(false);
+                    app.set_wifi_connected_ip("".into());
                     app.set_wifi_connecting(false);
                 }
                 WifiEvent::Disconnected => {
                     app.set_wifi_is_connected(false);
+                    app.set_wifi_connected_ip("".into());
+                    app.set_wifi_status("Соединение потеряно".into());
                 }
             }
         }
