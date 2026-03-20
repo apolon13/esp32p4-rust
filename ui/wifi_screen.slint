@@ -165,38 +165,7 @@ export component WifiScreen {
 
     property <bool> keyboard-visible: false;
     property <bool> show-form: root.selected-index >= 0;
-    property <length> ptr-h: 80px;
-    property <bool> ptr-inited: false;
-    property <bool> scan-was-active: false;
-
     CyrillicCoverage {}
-
-    // Pull-to-refresh viewport management
-    Timer {
-        interval: 10ms;
-        running: !root.ptr-inited;
-        triggered => {
-            grid-flick.viewport-y = -root.ptr-h;
-            root.ptr-inited = true;
-        }
-    }
-
-    Timer {
-        interval: 100ms;
-        running: root.ptr-inited;
-        triggered => {
-            if root.scan-was-active && !root.scanning {
-                grid-flick.viewport-y = -root.ptr-h;
-            }
-            root.scan-was-active = root.scanning;
-            if !root.scanning && root.ready && !root.connecting && !root.show-form {
-                if grid-flick.viewport-y > -(root.ptr-h * 0.15) {
-                    root.scanning = true;
-                    root.scan-requested();
-                }
-            }
-        }
-    }
 
     Rectangle {
         clip: true;
@@ -334,8 +303,8 @@ export component WifiScreen {
             clip:       true;
 
             // Scrollable card grid (behind overlays)
-            grid-flick := Flickable {
-                interactive: !root.scanning && root.ready && !root.connecting;
+            Flickable {
+                interactive: root.networks.length > 0 && !root.scanning;
                 viewport-width:  self.width;
                 property <length> pad:    12px;
                 property <length> gap:    10px;
@@ -344,35 +313,14 @@ export component WifiScreen {
                 property <int>    num-rows: root.networks.length > 0
                     ? floor((root.networks.length - 1) / 3) + 1
                     : 0;
-                property <length> grid-h: num-rows > 0
+                viewport-height: num-rows > 0
                     ? num-rows * (card-h + gap) - gap + pad * 2
-                    : 0px;
-
-                viewport-height: root.ptr-h
-                    + (grid-h > self.height ? grid-h : self.height);
-
-                Rectangle {
-                    y: 0;
-                    height: root.ptr-h;
-                    width: parent.viewport-width;
-
-                    Text {
-                        text: root.scanning ? "Обновление..."
-                            : grid-flick.viewport-y > -(root.ptr-h * 0.15)
-                              ? "↑ Отпустите для обновления"
-                              : "↓ Потяните для обновления";
-                        color: grid-flick.viewport-y > -(root.ptr-h * 0.15)
-                            ? #58a6ff : #484f58;
-                        font-size: 13px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
+                    : self.height;
 
                 for net[idx] in root.networks: NetworkCard {
                     data:   net;
                     x:      mod(idx, 3) * (card-w + gap) + pad;
-                    y:      root.ptr-h + floor(idx / 3) * (card-h + gap) + pad;
+                    y:      floor(idx / 3) * (card-h + gap) + pad;
                     width:  card-w;
                     height: card-h;
                     clicked => {
