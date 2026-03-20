@@ -96,13 +96,16 @@ component PasswordField {
 // threshold in the touch controller prevents jitter from triggering scroll.
 component NetworkCard {
     in property <NetworkInfo> data;
+    in property <bool> active: false;
     callback clicked();
 
     Rectangle {
-        background:    ta.has-hover ? #1c2128 : #161b22;
+        background:    root.active ? #0d2818
+                     : ta.has-hover ? #1c2128 : #161b22;
         border-radius: 12px;
-        border-width:  1px;
-        border-color:  ta.has-hover ? #388bfd : #30363d;
+        border-width:  root.active ? 2px : 1px;
+        border-color:  root.active ? #238636
+                     : ta.has-hover ? #388bfd : #30363d;
         animate background   { duration: 100ms; }
         animate border-color { duration: 100ms; }
 
@@ -110,12 +113,24 @@ component NetworkCard {
             padding: 12px;
             spacing: 6px;
 
-            Text {
-                text:        root.data.ssid;
-                color:       #e6edf3;
-                font-size:   14px;
-                font-weight: 600;
-                overflow:    elide;
+            HorizontalLayout {
+                spacing: 6px;
+
+                if root.active: Text {
+                    text:               "●";
+                    color:              #3fb950;
+                    font-size:          14px;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text:               root.data.ssid;
+                    color:              root.active ? #3fb950 : #e6edf3;
+                    font-size:          14px;
+                    font-weight:        600;
+                    overflow:           elide;
+                    horizontal-stretch: 1;
+                }
             }
 
             HorizontalLayout {
@@ -178,7 +193,8 @@ export component WifiScreen {
             width: parent.width;
             height: parent.height;
             background: #0d1117;
-            animate x { duration: 250ms; easing: ease-in-out; }
+            cache-rendering-hint: true;
+            animate x { duration: 300ms; easing: ease-out; }
 
         // ── Header ────────────────────────────────────────────────
         Rectangle {
@@ -319,6 +335,7 @@ export component WifiScreen {
 
                 for net[idx] in root.networks: NetworkCard {
                     data:   net;
+                    active: root.is-connected && net.ssid == root.connected-ssid;
                     x:      mod(idx, 3) * (card-w + gap) + pad;
                     y:      floor(idx / 3) * (card-h + gap) + pad;
                     width:  card-w;
@@ -393,7 +410,8 @@ export component WifiScreen {
             width: parent.width;
             height: parent.height;
             background: #0d1117;
-            animate x { duration: 250ms; easing: ease-in-out; }
+            cache-rendering-hint: true;
+            animate x { duration: 300ms; easing: ease-out; }
 
         // ── Header with back button ────────────────────────────────
         Rectangle {
