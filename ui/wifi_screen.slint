@@ -165,7 +165,7 @@ export component WifiScreen {
 
     property <bool> keyboard-visible: false;
     property <bool> show-form: root.selected-index >= 0;
-    property <length> ptr-h: 50px;
+    property <length> ptr-h: 80px;
     property <bool> ptr-inited: false;
     property <bool> scan-was-active: false;
 
@@ -190,7 +190,7 @@ export component WifiScreen {
             }
             root.scan-was-active = root.scanning;
             if !root.scanning && root.ready && !root.connecting && !root.show-form {
-                if grid-flick.viewport-y > -(root.ptr-h / 3) {
+                if grid-flick.viewport-y > -(root.ptr-h * 0.15) {
                     root.scanning = true;
                     root.scan-requested();
                 }
@@ -357,8 +357,12 @@ export component WifiScreen {
                     width: parent.viewport-width;
 
                     Text {
-                        text: root.scanning ? "Обновление..." : "↓ Обновить";
-                        color: #484f58;
+                        text: root.scanning ? "Обновление..."
+                            : grid-flick.viewport-y > -(root.ptr-h * 0.15)
+                              ? "↑ Отпустите для обновления"
+                              : "↓ Потяните для обновления";
+                        color: grid-flick.viewport-y > -(root.ptr-h * 0.15)
+                            ? #58a6ff : #484f58;
                         font-size: 13px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
