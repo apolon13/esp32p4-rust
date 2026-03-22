@@ -2,6 +2,7 @@ slint::include_modules!();
 
 mod display;
 mod platform;
+mod rf_receiver;
 mod screens;
 mod touch;
 mod wifi;
@@ -15,8 +16,24 @@ fn main() {
     let mut touch = touch::TouchController::init();
     let window    = platform::init(display::WIDTH, display::HEIGHT);
 
-    // ── WiFi worker — spawned on Core 1, never blocks the render loop ─
-    let wifi_worker = spawn_wifi_worker();
+    // ── Peripherals (take once, distribute pins) ───────────────────
+    let (wifi_worker, _rf) = {
+        use esp_idf_svc::{
+            eventloop::EspSystemEventLoop,
+            hal::peripherals::Peripherals,
+            nvs::EspDefaultNvsPartition,
+        };
+        let p = Peripherals::take().expect("peripherals taken");
+        let s = EspSystemEventLoop::take().expect("event loop taken");
+        let n = EspDefaultNvsPartition::take().expect("NVS taken");
+
+        // SRX882 433 MHz receiver: GPIO1 = CH (enable), GPIO2 = DATA
+        rf_receiver::spawn(p.pins.gpio1, p.pins.gpio2);
+
+        // WiFi worker — spawned on Core 1, never blocks the render loop
+        let wifi_worker = wifi::WifiWorker::spawn(p.modem, s, n);
+        (wifi_worker, ())
+    };
 
     // ── UI ────────────────────────────────────────────────────────
     let app = AppWindow::new().expect("failed to create AppWindow");
@@ -75,14 +92,3 @@ fn main() {
     }
 }
 
-fn spawn_wifi_worker() -> wifi::WifiWorker {
-    use esp_idf_svc::{
-        eventloop::EspSystemEventLoop,
-        hal::peripherals::Peripherals,
-        nvs::EspDefaultNvsPartition,
-    };
-    let p = Peripherals::take().expect("peripherals taken");
-    let s = EspSystemEventLoop::take().expect("event loop taken");
-    let n = EspDefaultNvsPartition::take().expect("NVS taken");
-    wifi::WifiWorker::spawn(p.modem, s, n)
-}

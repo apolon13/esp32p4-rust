@@ -1,4 +1,4 @@
-PORT       ?= /dev/cu.usbmodem101
+PORT       ?= /dev/cu.usbmodem2301
 BAUD       ?= 460800
 CHIP       ?= esp32p4
 TARGET     ?= riscv32imafc-esp-espidf
