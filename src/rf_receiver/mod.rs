@@ -10,6 +10,18 @@ use esp_idf_svc::hal::{
 use esp_idf_svc::sys::EspError;
 use std::time::Duration;
 
+// ── Public types ────────────────────────────────────────────────────────────
+
+/// Successfully decoded RF code with protocol metadata.
+#[derive(Debug, Clone)]
+pub struct RfCode {
+    pub code: u64,
+    pub bit_count: u8,
+    pub protocol: &'static str,
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
 /// Spawn a background thread that captures 433 MHz RC codes from the SRX882
 /// receiver (CH = GPIO1, DATA = GPIO2) and logs every recognised code.
 pub fn spawn(ch_pin: Gpio1<'_>, data_pin: Gpio2<'_>) {
@@ -29,7 +41,196 @@ pub fn spawn(ch_pin: Gpio1<'_>, data_pin: Gpio2<'_>) {
         .expect("rf_recv thread spawn failed");
 }
 
-// ── Main receive loop ────────────────────────────────────────────────────────
+// ── Protocol table ──────────────────────────────────────────────────────────
+//
+// Each entry describes OOK timing in multiples of a base period T:
+//   sync  = HIGH(sync_high·T) + LOW(sync_low·T)
+//   bit 0 = HIGH(zero_high·T) + LOW(zero_low·T)
+//   bit 1 = HIGH(one_high·T)  + LOW(one_low·T)
+//
+// The decoder derives T from the observed sync pulse length and checks that
+// it falls within [t_min, t_max] µs.  Protocols are tried in order — put the
+// most common / most distinctive first.
+
+struct Protocol {
+    name: &'static str,
+    sync_high: u32,
+    sync_low: u32,
+    zero_high: u32,
+    zero_low: u32,
+    one_high: u32,
+    one_low: u32,
+    bit_count: u8,
+    t_min: u32,
+    t_max: u32,
+}
+
+static PROTOCOLS: &[Protocol] = &[
+    // ── 24-bit protocols (sensors, PIR, door/window, remotes) ───────────
+    //
+    // EV1527 / PT2262 — by far the most widespread 433 MHz encoding.
+    // Used in: generic door/window sensors, PIR motion detectors, smoke
+    // detectors, water leak sensors, cheap security remotes.
+    // Sync 1:31, Bit0 1:3, Bit1 3:1, T ≈ 100–500 µs
+    Protocol {
+        name: "EV1527",
+        sync_high: 1,
+        sync_low: 31,
+        zero_high: 1,
+        zero_low: 3,
+        one_high: 3,
+        one_low: 1,
+        bit_count: 24,
+        t_min: 80,
+        t_max: 800,
+    },
+    // High-resolution variant — some smoke / gas sensors.
+    // Sync 1:71, Bit0 4:11, Bit1 9:6
+    Protocol {
+        name: "EV1527-HR",
+        sync_high: 1,
+        sync_low: 71,
+        zero_high: 4,
+        zero_low: 11,
+        one_high: 9,
+        one_low: 6,
+        bit_count: 24,
+        t_min: 50,
+        t_max: 400,
+    },
+    // HS2303-PT — long-HIGH sync, standalone PIR sensors.
+    // Sync 36:1, Bit0 1:2, Bit1 2:1
+    Protocol {
+        name: "HS2303",
+        sync_high: 36,
+        sync_low: 1,
+        zero_high: 1,
+        zero_low: 2,
+        one_high: 2,
+        one_low: 1,
+        bit_count: 24,
+        t_min: 50,
+        t_max: 500,
+    },
+    // PT2262 variant — some branded door/window & motion sensors.
+    // Sync 1:10, Bit0 1:2, Bit1 2:1
+    Protocol {
+        name: "PT2262v2",
+        sync_high: 1,
+        sync_low: 10,
+        zero_high: 1,
+        zero_low: 2,
+        one_high: 2,
+        one_low: 1,
+        bit_count: 24,
+        t_min: 200,
+        t_max: 1200,
+    },
+    // SC2262 / SC5262 — older alarm panels, keyfobs.
+    // Sync 1:10, Bit0 1:3, Bit1 3:1
+    Protocol {
+        name: "SC2262",
+        sync_high: 1,
+        sync_low: 10,
+        zero_high: 1,
+        zero_low: 3,
+        one_high: 3,
+        one_low: 1,
+        bit_count: 24,
+        t_min: 100,
+        t_max: 700,
+    },
+    // Medium-sync variant — Kerui / Sonoff-compatible sensors.
+    // Sync 1:23, Bit0 1:2, Bit1 2:1
+    Protocol {
+        name: "Kerui",
+        sync_high: 1,
+        sync_low: 23,
+        zero_high: 1,
+        zero_low: 2,
+        one_high: 2,
+        one_low: 1,
+        bit_count: 24,
+        t_min: 150,
+        t_max: 900,
+    },
+    // Short-sync variant — some cheap Chinese security kits.
+    // Sync 1:6, Bit0 1:3, Bit1 3:1
+    Protocol {
+        name: "ShortSync",
+        sync_high: 1,
+        sync_low: 6,
+        zero_high: 1,
+        zero_low: 3,
+        one_high: 3,
+        one_low: 1,
+        bit_count: 24,
+        t_min: 100,
+        t_max: 800,
+    },
+    // ── 28-bit protocols ────────────────────────────────────────────────
+    //
+    // HT6P20B — Sonoff / eWeLink security remotes (22 addr + 2 data + 4 anti).
+    // Sync 10:40, Bit0 1:5, Bit1 3:3
+    Protocol {
+        name: "HT6P20B",
+        sync_high: 10,
+        sync_low: 40,
+        zero_high: 1,
+        zero_low: 5,
+        one_high: 3,
+        one_low: 3,
+        bit_count: 28,
+        t_min: 100,
+        t_max: 900,
+    },
+    // ── 12-bit protocols (gate remotes, keypads) ────────────────────────
+    //
+    // Nice FLO — gate / garage remotes.
+    // Sync 1:36, Bit0 1:3, Bit1 3:1
+    Protocol {
+        name: "NiceFLO",
+        sync_high: 1,
+        sync_low: 36,
+        zero_high: 1,
+        zero_low: 3,
+        one_high: 3,
+        one_low: 1,
+        bit_count: 12,
+        t_min: 200,
+        t_max: 900,
+    },
+    // Holtek HT12E — security keypads, simple wireless remotes.
+    // Sync 1:36, Bit0 1:2, Bit1 2:1
+    Protocol {
+        name: "HT12E",
+        sync_high: 1,
+        sync_low: 36,
+        zero_high: 1,
+        zero_low: 2,
+        one_high: 2,
+        one_low: 1,
+        bit_count: 12,
+        t_min: 100,
+        t_max: 600,
+    },
+    // CAME TOP — 12-bit gate / barrier remotes.
+    // Sync 1:18, Bit0 1:3, Bit1 3:1
+    Protocol {
+        name: "CAME",
+        sync_high: 1,
+        sync_low: 18,
+        zero_high: 1,
+        zero_low: 3,
+        one_high: 3,
+        one_low: 1,
+        bit_count: 12,
+        t_min: 200,
+        t_max: 700,
+    },
+];
+
+// ── Main receive loop ───────────────────────────────────────────────────────
 
 fn receiver_loop(ch_pin: Gpio1<'static>, data_pin: Gpio2<'static>) -> Result<(), EspError> {
     let mut ch = PinDriver::output(ch_pin)?;
@@ -53,24 +254,35 @@ fn receiver_loop(ch_pin: Gpio1<'static>, data_pin: Gpio2<'static>) -> Result<(),
     };
 
     let mut buf = [Symbol::default(); 256];
-    let mut prev_code: u32 = 0;
+    let mut prev_code: u64 = 0;
+    let mut prev_proto: &str = "";
     let mut prev_time = std::time::Instant::now();
 
-    log::info!("RF: listening for 433 MHz RC codes on GPIO2 …");
+    log::info!(
+        "RF: listening for 433 MHz codes on GPIO2 ({} protocols loaded)",
+        PROTOCOLS.len(),
+    );
 
     loop {
         match rx.receive(&mut buf, &rx_cfg) {
-            Ok(n) if n >= 25 => {
+            Ok(n) if n >= 13 => {
                 let symbols = &buf[..n];
-                if let Some((code, bits, proto)) = decode_rc(symbols) {
+                if let Some(rc) = decode_rc(symbols) {
                     let now = std::time::Instant::now();
-                    if code != prev_code
-                        || now.duration_since(prev_time) > Duration::from_millis(400)
-                    {
+                    let is_repeat = rc.code == prev_code
+                        && rc.protocol == prev_proto
+                        && now.duration_since(prev_time) < Duration::from_millis(400);
+
+                    if !is_repeat {
                         log::info!(
-                            "RC code: 0x{code:06X} (dec: {code}, {bits} bits, proto: {proto})"
+                            "RF [{proto}] code=0x{code:0width$X} (dec={code}, {bits}bit)",
+                            proto = rc.protocol,
+                            code = rc.code,
+                            bits = rc.bit_count,
+                            width = ((rc.bit_count as usize) + 3) / 4,
                         );
-                        prev_code = code;
+                        prev_code = rc.code;
+                        prev_proto = rc.protocol;
                         prev_time = now;
                     }
                 } else {
@@ -90,22 +302,20 @@ fn receiver_loop(ch_pin: Gpio1<'static>, data_pin: Gpio2<'static>) -> Result<(),
     }
 }
 
-// ── Protocol decoding ────────────────────────────────────────────────────────
+// ── Generic table-driven decoder ────────────────────────────────────────────
 
-fn decode_rc(symbols: &[Symbol]) -> Option<(u32, u8, &'static str)> {
-    decode_ev1527(symbols).map(|(c, b)| (c, b, "EV1527"))
+fn decode_rc(symbols: &[Symbol]) -> Option<RfCode> {
+    for proto in PROTOCOLS {
+        if let Some(rc) = try_protocol(symbols, proto) {
+            return Some(rc);
+        }
+    }
+    None
 }
 
-/// EV1527 / PT2262 24-bit protocol.
-///
-/// Frame structure (each element is one RMT symbol):
-///   sync : HIGH 1·T  +  LOW 31·T
-///   bit 0: HIGH 1·T  +  LOW 3·T
-///   bit 1: HIGH 3·T  +  LOW 1·T
-///
-/// T is typically 100–500 µs depending on the transmitter.
-fn decode_ev1527(symbols: &[Symbol]) -> Option<(u32, u8)> {
-    let needed = 25; // 1 sync + 24 data bits
+/// Try to decode `symbols` using a single protocol definition.
+fn try_protocol(symbols: &[Symbol], proto: &'static Protocol) -> Option<RfCode> {
+    let needed = 1 + proto.bit_count as usize;
 
     for start in 0..symbols.len().saturating_sub(needed) {
         let sync = symbols[start];
@@ -119,40 +329,62 @@ fn decode_ev1527(symbols: &[Symbol]) -> Option<(u32, u8)> {
         let ht = h.ticks.ticks() as u32;
         let lt = l.ticks.ticks() as u32;
 
-        // Plausible base period: 80–800 µs
-        if ht < 80 || ht > 800 {
-            continue;
-        }
-        // Sync ratio HIGH:LOW ≈ 1:31 (accept 1:10 … 1:50)
-        let ratio = lt / ht.max(1);
-        if !(10..=50).contains(&ratio) {
+        // Derive T from the total sync duration.
+        let sync_units = proto.sync_high + proto.sync_low;
+        let t = (ht + lt) / sync_units;
+
+        if t < proto.t_min || t > proto.t_max {
             continue;
         }
 
-        let t = ht;
+        // Verify sync HIGH and LOW match the expected multiples of T.
+        let sync_tol = (t * 2).max(100);
+        if !near(ht, t * proto.sync_high, sync_tol)
+            || !near(lt, t * proto.sync_low, sync_tol)
+        {
+            continue;
+        }
 
-        if let Some(code) = try_decode_bits(symbols, start + 1, 24, t) {
-            return Some((code, 24));
+        if let Some(code) =
+            decode_bits(symbols, start + 1, proto.bit_count as usize, t, proto)
+        {
+            return Some(RfCode {
+                code,
+                bit_count: proto.bit_count,
+                protocol: proto.name,
+            });
         }
     }
     None
 }
 
-fn try_decode_bits(symbols: &[Symbol], offset: usize, num_bits: usize, t: u32) -> Option<u32> {
+/// Attempt to decode `num_bits` data symbols starting at `offset`.
+fn decode_bits(
+    symbols: &[Symbol],
+    offset: usize,
+    num_bits: usize,
+    t: u32,
+    proto: &Protocol,
+) -> Option<u64> {
     if offset + num_bits > symbols.len() {
         return None;
     }
-    let mut code: u32 = 0;
+
+    let tol = (t * 3 / 4).max(80);
+    let mut code: u64 = 0;
+
     for i in 0..num_bits {
         let sym = symbols[offset + i];
         let bh = sym.level0().ticks.ticks() as u32;
         let bl = sym.level1().ticks.ticks() as u32;
 
         code <<= 1;
-        if near(bh, t * 3, t) && near(bl, t, t) {
+        if near(bh, t * proto.one_high, tol) && near(bl, t * proto.one_low, tol) {
             code |= 1;
-        } else if near(bh, t, t) && near(bl, t * 3, t) {
-            // bit 0 — already shifted in as 0
+        } else if near(bh, t * proto.zero_high, tol)
+            && near(bl, t * proto.zero_low, tol)
+        {
+            // bit 0 — already shifted in
         } else {
             return None;
         }
@@ -160,12 +392,12 @@ fn try_decode_bits(symbols: &[Symbol], offset: usize, num_bits: usize, t: u32) -
     Some(code)
 }
 
-fn near(val: u32, expected: u32, base_t: u32) -> bool {
-    let tol = (base_t * 3 / 4).max(80);
-    val.abs_diff(expected) <= tol
+#[inline]
+fn near(val: u32, expected: u32, tolerance: u32) -> bool {
+    val.abs_diff(expected) <= tolerance
 }
 
-// ── Debug helpers ────────────────────────────────────────────────────────────
+// ── Debug helpers ───────────────────────────────────────────────────────────
 
 fn dump_symbols(symbols: &[Symbol]) {
     if !log::log_enabled!(log::Level::Debug) {
