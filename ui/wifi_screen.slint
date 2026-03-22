@@ -218,7 +218,7 @@ export component WifiScreen {
 
                 if root.is-connected: Rectangle {
                     width:         200px;
-                    height:        46px;
+                    height:        56px;
                     background:    #0d2818;
                     border-radius: 6px;
                     border-width:  1px;
@@ -353,14 +353,51 @@ export component WifiScreen {
             }
 
             // Empty state (drawn on top of Flickable)
-            if root.networks.length == 0 && !root.scanning: Text {
-                text:                 root.connecting ? "Автоподключение..."
-                                                 : root.ready ? "Нажмите Сканировать"
+            if root.networks.length == 0 && !root.scanning && !root.connecting: Text {
+                text:                 root.ready ? "Нажмите Сканировать"
                                                  : "Инициализация Wi-Fi...";
-                color:                root.connecting ? #58a6ff : #484f58;
+                color:                #484f58;
                 font-size:            14px;
                 horizontal-alignment: center;
                 vertical-alignment:   center;
+            }
+
+            // Auto-connect overlay with cancel button
+            if root.networks.length == 0 && !root.scanning && root.connecting: VerticalLayout {
+                alignment: center;
+                spacing:   20px;
+
+                Text {
+                    text:                 "Автоподключение...";
+                    color:                #58a6ff;
+                    font-size:            14px;
+                    horizontal-alignment: center;
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        width:         200px;
+                        height:        48px;
+                        background:    auto-cancel-ta.has-hover ? #3d1414 : #21262d;
+                        border-radius: 8px;
+                        border-width:  1px;
+                        border-color:  #da3633;
+                        animate background { duration: 100ms; }
+
+                        Text {
+                            text:                 "Отмена";
+                            color:                #f85149;
+                            font-size:            15px;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                        }
+                        auto-cancel-ta := TouchArea {
+                            clicked => { root.cancel-connect(); }
+                        }
+                    }
+                }
             }
 
             // Scanning overlay (drawn on top of Flickable)

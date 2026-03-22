@@ -1,23 +1,25 @@
 slint::include_modules!();
 
 mod display;
+mod logger;
 mod platform;
+mod rc_devices;
 mod rf_receiver;
 mod screens;
 mod touch;
 mod wifi;
 
 fn main() {
-    esp_idf_svc::sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
+    // ── Логгер (до всего остального, чтобы поймать каждое сообщение) ─
+    let log_buffer = logger::install();
 
     // ── Hardware ──────────────────────────────────────────────────
     let display   = display::Display::init();
     let mut touch = touch::TouchController::init();
     let window    = platform::init(display::WIDTH, display::HEIGHT);
 
-    // ── Peripherals (take once, distribute pins) ───────────────────
-    let (wifi_worker, _rf) = {
+    // ── Peripherals ───────────────────────────────────────────────
+    let (wifi_worker, rf_receiver, device_store) = {
         use esp_idf_svc::{
             eventloop::EspSystemEventLoop,
             hal::peripherals::Peripherals,
@@ -27,12 +29,15 @@ fn main() {
         let s = EspSystemEventLoop::take().expect("event loop taken");
         let n = EspDefaultNvsPartition::take().expect("NVS taken");
 
-        // SRX882 433 MHz receiver: GPIO1 = CH (enable), GPIO2 = DATA
-        rf_receiver::spawn(p.pins.gpio1, p.pins.gpio2);
+        // SRX882 433 MHz receiver: GPIO1 = CH (enable), GPIO2 = DATA.
+        let rf_receiver = rf_receiver::RfReceiver::spawn(p.pins.gpio1, p.pins.gpio2);
 
-        // WiFi worker — spawned on Core 1, never blocks the render loop
+        // RF device store — открываем NVS до передачи partition в WiFi.
+        let device_store = rc_devices::DeviceStore::open(n.clone());
+
+        // WiFi worker — spawned on Core 1, never blocks the render loop.
         let wifi_worker = wifi::WifiWorker::spawn(p.modem, s, n);
-        (wifi_worker, ())
+        (wifi_worker, rf_receiver, device_store)
     };
 
     // ── UI ────────────────────────────────────────────────────────
@@ -41,9 +46,10 @@ fn main() {
 
     // ── Screen handlers ───────────────────────────────────────────
     let wifi_screen = screens::wifi::WifiScreenHandler::new(&app, wifi_worker);
+    let rc_screen   = screens::rc_devices::RcDevicesScreenHandler::new(&app, rf_receiver, device_store);
+    let log_screen  = screens::logs::LogScreenHandler::new(&app, log_buffer);
 
     // Pre-fill both physical framebuffers before turning on the backlight.
-    // SwappedBuffers needs two renders so neither buffer contains raw PSRAM.
     for _ in 0..2 {
         window.request_redraw();
         window.draw_if_needed(|renderer| {
@@ -60,19 +66,12 @@ fn main() {
     }
 
     // ── Render loop (Core 0) ──────────────────────────────────────
-    //
-    // RepaintBufferType::SwappedBuffers: Slint internally accumulates dirty
-    // regions across two consecutive draw calls, so both physical framebuffers
-    // are always brought up to date after any UI change.
-    //
-    // After rendering, display.sync_vsync() commits the back buffer to the
-    // DPI controller via esp_lcd_panel_draw_bitmap and waits for the refresh
-    // cycle that confirms the switch.  When idle (no render), we pace the
-    // loop to vsync with try_vsync_timeout, polling touch every 4 ms.
     loop {
         touch.poll(&window);
         slint::platform::update_timers_and_animations();
         wifi_screen.poll();
+        rc_screen.poll();
+        log_screen.poll();
 
         let mut rendered = false;
         window.draw_if_needed(|renderer| {
@@ -91,4 +90,3 @@ fn main() {
         unsafe { esp_idf_svc::sys::esp_task_wdt_reset(); }
     }
 }
-

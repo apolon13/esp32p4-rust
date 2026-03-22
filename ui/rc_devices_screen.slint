@@ -1,0 +1,576 @@
+import { VirtualKeyboard } from "keyboard.slint";
+
+// ── Data types ────────────────────────────────────────────────────────────────
+
+export struct RcDeviceInfo {
+    id:          int,
+    name:        string,
+    device-type: string,
+    code-hex:    string,
+    protocol:    string,
+    bit-count:   int,
+}
+
+// ── Device type selector button ───────────────────────────────────────────────
+component TypeButton {
+    in property <string> label;
+    in property <bool>   selected;
+    callback clicked();
+
+    height: 38px;
+    horizontal-stretch: 1;
+
+    Rectangle {
+        background:   root.selected ? #1f6feb : (ta.has-hover ? #21262d : #161b22);
+        border-radius: 6px;
+        border-width:  1px;
+        border-color:  root.selected ? #388bfd : #30363d;
+        animate background   { duration: 100ms; }
+        animate border-color { duration: 100ms; }
+
+        Text {
+            text:                 root.label;
+            color:                root.selected ? #ffffff : #8b949e;
+            font-size:            12px;
+            horizontal-alignment: center;
+            vertical-alignment:   center;
+        }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// ── Saved device card ─────────────────────────────────────────────────────────
+component DeviceCard {
+    in property <RcDeviceInfo> data;
+    callback edit();
+    callback delete();
+
+    height: 82px;
+
+    Rectangle {
+        background:    #161b22;
+        border-radius: 10px;
+        border-width:  1px;
+        border-color:  #30363d;
+
+        HorizontalLayout {
+            padding: 14px;
+            spacing: 8px;
+
+            VerticalLayout {
+                alignment:          center;
+                spacing:            5px;
+                horizontal-stretch: 1;
+
+                Text {
+                    text:        root.data.name != "" ? root.data.name : "(без имени)";
+                    color:       root.data.name != "" ? #e6edf3 : #484f58;
+                    font-size:   15px;
+                    font-weight: 600;
+                    overflow:    elide;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+
+                    Text {
+                        text:               root.data.device-type;
+                        color:              #58a6ff;
+                        font-size:          12px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text:               "·";
+                        color:              #484f58;
+                        font-size:          12px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text:               root.data.protocol;
+                        color:              #8b949e;
+                        font-size:          12px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text:               "·";
+                        color:              #484f58;
+                        font-size:          12px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text:               "0x" + root.data.code-hex;
+                        color:              #7ee787;
+                        font-size:          12px;
+                        font-weight:        600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow:           elide;
+                    }
+                }
+            }
+
+            // Edit button
+            Rectangle {
+                width:         56px;
+                background:    edit-ta.has-hover ? #1c2028 : transparent;
+                border-radius: 6px;
+                border-width:  1px;
+                border-color:  edit-ta.has-hover ? #388bfd : transparent;
+                animate background   { duration: 100ms; }
+                animate border-color { duration: 100ms; }
+
+                Text {
+                    text:                 "Ред.";
+                    color:                #58a6ff;
+                    font-size:            12px;
+                    font-weight:          600;
+                    horizontal-alignment: center;
+                    vertical-alignment:   center;
+                }
+                edit-ta := TouchArea { clicked => { root.edit(); } }
+            }
+
+            // Delete button
+            Rectangle {
+                width:         48px;
+                background:    del-ta.has-hover ? #3d1414 : transparent;
+                border-radius: 6px;
+                border-width:  1px;
+                border-color:  del-ta.has-hover ? #da3633 : transparent;
+                animate background   { duration: 100ms; }
+                animate border-color { duration: 100ms; }
+
+                Text {
+                    text:                 "Уд.";
+                    color:                #f85149;
+                    font-size:            12px;
+                    font-weight:          600;
+                    horizontal-alignment: center;
+                    vertical-alignment:   center;
+                }
+                del-ta := TouchArea { clicked => { root.delete(); } }
+            }
+        }
+    }
+}
+
+// ── Animated scanning dots ────────────────────────────────────────────────────
+component ScanDots {
+    in property <bool> running: false;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing:   10px;
+
+        d1 := Rectangle {
+            width: 12px; height: 12px; border-radius: 6px; background: #1f6feb;
+            property <bool> f: false;
+            opacity: f ? 1.0 : 0.15;
+            animate opacity { duration: 500ms; easing: ease-in-out; }
+            Timer { interval: 500ms; running: root.running; triggered => { d1.f = !d1.f; } }
+        }
+        d2 := Rectangle {
+            width: 12px; height: 12px; border-radius: 6px; background: #1f6feb;
+            property <bool> f: false;
+            opacity: f ? 1.0 : 0.15;
+            animate opacity { duration: 500ms; delay: 165ms; easing: ease-in-out; }
+            Timer { interval: 500ms; running: root.running; triggered => { d2.f = !d2.f; } }
+        }
+        d3 := Rectangle {
+            width: 12px; height: 12px; border-radius: 6px; background: #1f6feb;
+            property <bool> f: false;
+            opacity: f ? 1.0 : 0.15;
+            animate opacity { duration: 500ms; delay: 330ms; easing: ease-in-out; }
+            Timer { interval: 500ms; running: root.running; triggered => { d3.f = !d3.f; } }
+        }
+    }
+}
+
+// ── Main RC devices screen ────────────────────────────────────────────────────
+export component RcDevicesScreen {
+    // ── Properties ──────────────────────────────────────────────────
+    in-out property <[RcDeviceInfo]> devices;
+    in-out property <bool>           scanning: false;
+    in-out property <bool>           show-form: false;
+
+    // Edit-form state — driven from Rust after scan, or set locally when editing
+    in-out property <int>    edit-id: 0;       // 0 = new device
+    in-out property <string> device-name;
+    in-out property <string> device-type;
+    in     property <string> code-hex;
+    in     property <string> protocol;
+    in     property <int>    bit-count: 0;
+
+    // ── Callbacks ────────────────────────────────────────────────────
+    callback scan-start();
+    callback scan-cancel();
+    callback device-save(int, string, string);   // id, name, type
+    callback device-delete(int);
+    callback device-name-delete-last();
+
+    // ── Internal state ───────────────────────────────────────────────
+    property <bool> keyboard-visible: false;
+
+    property <[string]> type-options: [
+        "Датчик", "Пульт", "Движение", "Гараж", "Дым/Газ", "Другое"
+    ];
+
+    // ════════════════════════════════════════════════════════════════
+    Rectangle {
+        clip: true;
+
+        // ══ PAGE 1 — Device list ══════════════════════════════════════
+        Rectangle {
+            x:          root.show-form ? -parent.width : 0px;
+            width:      parent.width;
+            height:     parent.height;
+            background: #0d1117;
+            animate x { duration: 300ms; easing: ease-out; }
+
+            // ── Header ─────────────────────────────────────────────
+            Rectangle {
+                y:          0;
+                height:     56px;
+                background: #161b22;
+
+                HorizontalLayout {
+                    padding-left:  20px;
+                    padding-right: 20px;
+                    spacing:       12px;
+
+                    Text {
+                        text:               "Устройства";
+                        color:              #e6edf3;
+                        font-size:          20px;
+                        font-weight:        700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    Rectangle {
+                        width:         160px;
+                        background:    root.scanning ? #161b22 : (add-ta.has-hover ? #2d333b : #21262d);
+                        border-radius: 6px;
+                        border-width:  1px;
+                        border-color:  root.scanning ? #1f6feb : #30363d;
+                        animate background   { duration: 150ms; }
+                        animate border-color { duration: 150ms; }
+
+                        Text {
+                            text:                 root.scanning ? "Сканирование..." : "+ Добавить";
+                            color:                root.scanning ? #1f6feb : #e6edf3;
+                            font-size:            14px;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                            animate color { duration: 150ms; }
+                        }
+
+                        add-ta := TouchArea {
+                            enabled: !root.scanning;
+                            clicked => { root.scan-start(); }
+                        }
+                    }
+                }
+            }
+
+            // ── Device list area ────────────────────────────────────
+            Rectangle {
+                y:          56px;
+                height:     parent.height - 56px;
+                background: #0d1117;
+                clip:       true;
+
+                Flickable {
+                    interactive:     root.devices.length > 0 && !root.scanning;
+                    viewport-width:  self.width;
+                    viewport-height: root.devices.length > 0
+                        ? root.devices.length * 94px + 24px
+                        : self.height;
+
+                    for dev[idx] in root.devices: DeviceCard {
+                        x:      12px;
+                        y:      idx * 94px + 12px;
+                        width:  parent.width - 24px;
+                        data:   dev;
+                        edit => {
+                            root.edit-id          = dev.id;
+                            root.device-name      = dev.name;
+                            root.device-type      = dev.device-type;
+                            root.keyboard-visible = false;
+                            root.show-form        = true;
+                        }
+                        delete => { root.device-delete(dev.id); }
+                    }
+                }
+
+                // Empty state
+                if root.devices.length == 0 && !root.scanning: VerticalLayout {
+                    alignment: center;
+                    spacing:   14px;
+
+                    Text {
+                        text:                 "Нет устройств";
+                        color:                #484f58;
+                        font-size:            16px;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                // Scanning overlay
+                if root.scanning: Rectangle {
+                    background: #0d1117f0;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing:   22px;
+
+                        Text {
+                            text:                 "Ожидание сигнала...";
+                            color:                #58a6ff;
+                            font-size:            18px;
+                            font-weight:          600;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text:                 "Нажмите кнопку на пульте или датчике.\nУже записанные коды игнорируются.";
+                            color:                #8b949e;
+                            font-size:            13px;
+                            horizontal-alignment: center;
+                        }
+
+                        ScanDots { running: root.scanning; }
+
+                        HorizontalLayout {
+                            alignment: center;
+
+                            Rectangle {
+                                width:         200px;
+                                height:        48px;
+                                background:    cancel-ta.has-hover ? #3d1414 : #21262d;
+                                border-radius: 8px;
+                                border-width:  1px;
+                                border-color:  #da3633;
+                                animate background { duration: 100ms; }
+
+                                Text {
+                                    text:                 "Отмена";
+                                    color:                #f85149;
+                                    font-size:            15px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment:   center;
+                                }
+                                cancel-ta := TouchArea {
+                                    clicked => { root.scan-cancel(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ══ PAGE 2 — Edit / Add form ══════════════════════════════════
+        Rectangle {
+            x:          root.show-form ? 0px : parent.width;
+            width:      parent.width;
+            height:     parent.height;
+            background: #0d1117;
+            animate x { duration: 300ms; easing: ease-out; }
+
+            // ── Header ─────────────────────────────────────────────
+            Rectangle {
+                y:          0;
+                height:     56px;
+                background: #161b22;
+
+                HorizontalLayout {
+                    padding-left:  8px;
+                    padding-right: 20px;
+                    spacing:       4px;
+
+                    Rectangle {
+                        width:         130px;
+                        background:    back-ta.has-hover ? #21262d : transparent;
+                        border-radius: 6px;
+                        animate background { duration: 100ms; }
+
+                        Text {
+                            x:                  12px;
+                            text:               "← Назад";
+                            color:              #58a6ff;
+                            font-size:          15px;
+                            vertical-alignment: center;
+                        }
+                        back-ta := TouchArea {
+                            clicked => {
+                                root.show-form        = false;
+                                root.keyboard-visible = false;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text:               root.edit-id == 0 ? "Новое устройство" : "Редактировать";
+                        color:              #e6edf3;
+                        font-size:          18px;
+                        font-weight:        700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+
+            // ── Form body ───────────────────────────────────────────
+            Rectangle {
+                y:          56px;
+                height:     parent.height - 56px;
+                background: #0d1117;
+                clip:       true;
+
+                VerticalLayout {
+                    padding:   20px;
+                    spacing:   14px;
+                    alignment: start;
+
+                    // RF info card (auto-filled, read-only)
+                    Rectangle {
+                        height:        70px;
+                        background:    #0d2818;
+                        border-radius: 10px;
+                        border-width:  1px;
+                        border-color:  #238636;
+
+                        HorizontalLayout {
+                            padding: 14px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing:   4px;
+
+                                Text {
+                                    text:      "Протокол: " + root.protocol;
+                                    color:     #7ee787;
+                                    font-size: 13px;
+                                }
+                                Text {
+                                    text:        "Код: 0x" + root.code-hex
+                                                 + "   (" + root.bit-count + " бит)";
+                                    color:       #3fb950;
+                                    font-size:   13px;
+                                    font-weight: 600;
+                                }
+                            }
+                        }
+                    }
+
+                    // Name label
+                    Text {
+                        text:      "Название:";
+                        color:     #8b949e;
+                        font-size: 13px;
+                    }
+
+                    // Name input field
+                    Rectangle {
+                        height:        48px;
+                        background:    #0d1117;
+                        border-radius: 8px;
+                        border-width:  1px;
+                        border-color:  root.keyboard-visible ? #1f6feb : #30363d;
+                        animate border-color { duration: 100ms; }
+
+                        HorizontalLayout {
+                            padding-left:  14px;
+                            padding-right: 14px;
+
+                            Text {
+                                text:               root.device-name != "" ? root.device-name
+                                                                           : "Введите название...";
+                                color:              root.device-name != "" ? #e6edf3 : #484f58;
+                                font-size:          16px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                        TouchArea { clicked => { root.keyboard-visible = !root.keyboard-visible; } }
+                    }
+
+                    // On-screen keyboard
+                    if root.keyboard-visible: VirtualKeyboard {
+                        value     <=> root.device-name;
+                        done          => { root.keyboard-visible = false; }
+                        delete-last   => { root.device-name-delete-last(); }
+                    }
+
+                    // Type selector (hidden when keyboard is open)
+                    if !root.keyboard-visible: Text {
+                        text:      "Тип устройства:";
+                        color:     #8b949e;
+                        font-size: 13px;
+                    }
+
+                    if !root.keyboard-visible: HorizontalLayout {
+                        spacing: 6px;
+
+                        for t in root.type-options: TypeButton {
+                            label:    t;
+                            selected: root.device-type == t;
+                            clicked => { root.device-type = t; }
+                        }
+                    }
+
+                    // Save button
+                    if !root.keyboard-visible: Rectangle {
+                        height:        52px;
+                        background:    save-ta.has-hover ? #2ea043 : #238636;
+                        border-radius: 10px;
+                        animate background { duration: 100ms; }
+
+                        Text {
+                            text:                 root.edit-id == 0
+                                                      ? "Сохранить устройство"
+                                                      : "Сохранить изменения";
+                            color:                #ffffff;
+                            font-size:            16px;
+                            font-weight:          700;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                        }
+                        save-ta := TouchArea {
+                            clicked => {
+                                root.show-form = false;
+                                root.device-save(root.edit-id, root.device-name, root.device-type);
+                            }
+                        }
+                    }
+
+                    // Delete button — only for existing devices
+                    if !root.keyboard-visible && root.edit-id != 0: Rectangle {
+                        height:        52px;
+                        background:    del-ta.has-hover ? #5a1d1d : #3d1414;
+                        border-radius: 10px;
+                        border-width:  1px;
+                        border-color:  #da3633;
+                        animate background { duration: 100ms; }
+
+                        Text {
+                            text:                 "Удалить устройство";
+                            color:                #f85149;
+                            font-size:            16px;
+                            font-weight:          700;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                        }
+                        del-ta := TouchArea {
+                            clicked => {
+                                root.show-form = false;
+                                root.device-delete(root.edit-id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,192 @@
+// level: 0=Error  1=Warn  2=Info  3=Debug  4=Trace
+export struct LogEntry {
+    level:   int,
+    message: string,
+}
+
+export component LogScreen {
+    in-out property <[LogEntry]> entries;
+    in-out property <int>        scroll-to: -1;
+    in-out property <bool>       pinned: false;
+
+    callback scroll-end();
+    callback scroll-start();
+    callback toggle-pin();
+
+    // ── Header ────────────────────────────────────────────────────
+    Rectangle {
+        y:          0;
+        height:     56px;
+        background: #161b22;
+
+        HorizontalLayout {
+            padding-left:  20px;
+            padding-right: 12px;
+            spacing:       8px;
+
+            Text {
+                text:               "Журнал";
+                color:              #e6edf3;
+                font-size:          20px;
+                font-weight:        700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            // «⇤ Начало»
+            Rectangle {
+                width:         110px;
+                background:    top-ta.has-hover ? #2d333b : #21262d;
+                border-radius: 6px;
+                border-width:  1px;
+                border-color:  #30363d;
+                animate background { duration: 100ms; }
+
+                Text {
+                    text:                 "⇤ Начало";
+                    color:                #8b949e;
+                    font-size:            13px;
+                    horizontal-alignment: center;
+                    vertical-alignment:   center;
+                }
+                top-ta := TouchArea { clicked => { root.scroll-start(); } }
+            }
+
+            // «Конец ⇥»
+            Rectangle {
+                width:         110px;
+                background:    end-ta.has-hover ? #2d333b : #21262d;
+                border-radius: 6px;
+                border-width:  1px;
+                border-color:  #30363d;
+                animate background { duration: 100ms; }
+
+                Text {
+                    text:                 "Конец ⇥";
+                    color:                #8b949e;
+                    font-size:            13px;
+                    horizontal-alignment: center;
+                    vertical-alignment:   center;
+                }
+                end-ta := TouchArea { clicked => { root.scroll-end(); } }
+            }
+
+            // «▶ Авто / ■ Стоп»
+            Rectangle {
+                width:         110px;
+                background:    pin-ta.has-hover
+                                   ? (root.pinned ? #3d1414 : #0d2818)
+                                   : (root.pinned ? #2a0f0f : #0a1f12);
+                border-radius: 6px;
+                border-width:  1px;
+                border-color:  root.pinned ? #da3633 : #238636;
+                animate background   { duration: 100ms; }
+                animate border-color { duration: 100ms; }
+
+                Text {
+                    text:                 root.pinned ? "■ Стоп" : "▶ Авто";
+                    color:                root.pinned ? #f85149 : #3fb950;
+                    font-size:            13px;
+                    horizontal-alignment: center;
+                    vertical-alignment:   center;
+                    animate color { duration: 100ms; }
+                }
+                pin-ta := TouchArea { clicked => { root.toggle-pin(); } }
+            }
+
+            // Счётчик
+            Text {
+                text:               root.entries.length + " стр.";
+                color:              #484f58;
+                font-size:          12px;
+                vertical-alignment: center;
+                min-width:          60px;
+            }
+        }
+    }
+
+    // ── Лог-панель ────────────────────────────────────────────────
+    Rectangle {
+        y:          56px;
+        height:     parent.height - 56px;
+        background: #010409;
+        clip:       true;
+
+        fl := Flickable {
+            interactive:     true;
+            viewport-width:  self.width;
+            viewport-height: root.entries.length * 22px + 8px;
+            animate viewport-y { duration: 200ms; easing: ease-out; }
+
+            for entry[idx] in root.entries: Rectangle {
+                y:          idx * 22px + 4px;
+                height:     22px;
+                background: row-ta.has-hover ? #0d1117 : transparent;
+
+                // Цвет по уровню: 0=Error 1=Warn 2=Info 3=Debug 4=Trace
+                property <color> entry-color:
+                    entry.level == 0 ? #f85149 :
+                    entry.level == 1 ? #f0883e :
+                    entry.level == 2 ? #e6edf3 :
+                    entry.level == 3 ? #8b949e :
+                                       #484f58;
+
+                property <string> entry-tag:
+                    entry.level == 0 ? "E" :
+                    entry.level == 1 ? "W" :
+                    entry.level == 2 ? "I" :
+                    entry.level == 3 ? "D" : "T";
+
+                HorizontalLayout {
+                    padding-left:  8px;
+                    padding-right: 8px;
+                    spacing:       6px;
+
+                    Text {
+                        text:               entry-tag;
+                        color:              entry-color;
+                        font-size:          12px;
+                        font-weight:        700;
+                        vertical-alignment: center;
+                        width:              12px;
+                    }
+
+                    Text {
+                        text:               entry.message;
+                        color:              entry-color;
+                        font-size:          12px;
+                        vertical-alignment: center;
+                        overflow:           elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                row-ta := TouchArea {
+                    clicked => { root.pinned = true; }
+                }
+            }
+        }
+
+        // Управление прокруткой из Rust: scroll-to ≥ 0 → прокрутить к строке.
+        Timer {
+            interval: 50ms;
+            running:  root.scroll-to >= 0;
+            triggered => {
+                if root.scroll-to >= 0 {
+                    fl.viewport-y = -clamp(
+                        root.scroll-to * 22 - (fl.height / 2px) + 11,
+                        0,
+                        max(0px, fl.viewport-height - fl.height) / 1px
+                    ) * 1px;
+                    root.scroll-to = -1;
+                }
+            }
+        }
+
+        // Тень сверху
+        Rectangle {
+            height:     12px;
+            background: @linear-gradient(180deg, #010409, transparent);
+        }
+    }
+}

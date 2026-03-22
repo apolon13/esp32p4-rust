@@ -1,4 +1,5 @@
 // On-screen virtual keyboard for embedded touch UI
+// Supports Latin (EN) and Russian (RU / ЙЦУКЕН) layouts.
 
 struct KeyDef {
     lo: string,  // normal label
@@ -26,9 +27,9 @@ component Key {
         border-color:  #30363d;
     }
     Text {
-        text:               label;
-        color:              #e6edf3;
-        font-size:          15px;
+        text:                 label;
+        color:                #e6edf3;
+        font-size:            15px;
         horizontal-alignment: center;
         vertical-alignment:   center;
     }
@@ -42,7 +43,7 @@ component KeyRow {
     HorizontalLayout {
         spacing: 3px;
         for k in keys: Key {
-            label: shift ? k.hi : k.lo;
+            label:      shift ? k.hi : k.lo;
             pressed(v) => { root.pressed(v); }
         }
     }
@@ -50,16 +51,17 @@ component KeyRow {
 
 export component VirtualKeyboard {
     in-out property <string> value;
-    in-out property <bool>   shift: false;
+    in-out property <bool>   shift:   false;
+    in-out property <bool>   lang-ru: false;
     callback done();
-    callback delete-last();  // string slicing unsupported in Slint — handled by Rust
+    callback delete-last();  // UTF-8 slicing handled by Rust
 
     height: 228px;
 
     VerticalLayout {
         spacing: 3px;
 
-        // ── Row 0: digits ────────────────────────────────────────────
+        // ── Row 0: digits (same for both layouts) ────────────────────
         KeyRow {
             shift: root.shift;
             keys: [
@@ -71,8 +73,8 @@ export component VirtualKeyboard {
             pressed(v) => { root.value += v; }
         }
 
-        // ── Row 1: QWERTYUIOP ────────────────────────────────────────
-        KeyRow {
+        // ── Rows 1–3: Latin ──────────────────────────────────────────
+        if !root.lang-ru: KeyRow {
             shift: root.shift;
             keys: [
                 {lo:"q",hi:"Q"},{lo:"w",hi:"W"},{lo:"e",hi:"E"},
@@ -82,9 +84,7 @@ export component VirtualKeyboard {
             ];
             pressed(v) => { root.value += v; }
         }
-
-        // ── Row 2: ASDFGHJKL- ─────────────────────────────────────────
-        KeyRow {
+        if !root.lang-ru: KeyRow {
             shift: root.shift;
             keys: [
                 {lo:"a",hi:"A"},{lo:"s",hi:"S"},{lo:"d",hi:"D"},
@@ -94,9 +94,7 @@ export component VirtualKeyboard {
             ];
             pressed(v) => { root.value += v; }
         }
-
-        // ── Row 3: ZXCVBNM.@ ─────────────────────────────────────────
-        KeyRow {
+        if !root.lang-ru: KeyRow {
             shift: root.shift;
             keys: [
                 {lo:"z",hi:"Z"},{lo:"x",hi:"X"},{lo:"c",hi:"C"},
@@ -106,15 +104,53 @@ export component VirtualKeyboard {
             pressed(v) => { root.value += v; }
         }
 
-        // ── Row 4: Shift / Space / Backspace ─────────────────────────
+        // ── Rows 1–3: Russian ЙЦУКЕН ──────────────────────────────────
+        if root.lang-ru: KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"й",hi:"Й"},{lo:"ц",hi:"Ц"},{lo:"у",hi:"У"},
+                {lo:"к",hi:"К"},{lo:"е",hi:"Е"},{lo:"н",hi:"Н"},
+                {lo:"г",hi:"Г"},{lo:"ш",hi:"Ш"},{lo:"щ",hi:"Щ"},
+                {lo:"з",hi:"З"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+        if root.lang-ru: KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"ф",hi:"Ф"},{lo:"ы",hi:"Ы"},{lo:"в",hi:"В"},
+                {lo:"а",hi:"А"},{lo:"п",hi:"П"},{lo:"р",hi:"Р"},
+                {lo:"о",hi:"О"},{lo:"л",hi:"Л"},{lo:"д",hi:"Д"},
+                {lo:"ж",hi:"Ж"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+        if root.lang-ru: KeyRow {
+            shift: root.shift;
+            keys: [
+                {lo:"я",hi:"Я"},{lo:"ч",hi:"Ч"},{lo:"с",hi:"С"},
+                {lo:"м",hi:"М"},{lo:"и",hi:"И"},{lo:"т",hi:"Т"},
+                {lo:"ь",hi:"Ь"},{lo:"б",hi:"Б"},{lo:"ю",hi:"Ю"},
+                {lo:".",hi:"-"},
+            ];
+            pressed(v) => { root.value += v; }
+        }
+
+        // ── Row 4: Shift / Lang / Space / Del ────────────────────────
         HorizontalLayout {
             spacing: 3px;
 
             Key {
-                label:              shift ? "SHF*" : "SHF";
+                label:              root.shift ? "SHF*" : "SHF";
                 horizontal-stretch: 1;
                 accent:             root.shift;
                 pressed(_) => { root.shift = !root.shift; }
+            }
+            Key {
+                label:              root.lang-ru ? "EN" : "RU";
+                horizontal-stretch: 1;
+                accent:             root.lang-ru;
+                pressed(_) => { root.lang-ru = !root.lang-ru; }
             }
             Key {
                 label:              " ";

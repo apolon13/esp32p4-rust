@@ -1,7 +1,11 @@
 // JC1060P470C_I_W_Y — 7" IPS 1024×600  |  Security Control Centre
-import { WifiScreen, NetworkInfo } from "wifi_screen.slint";
+import { WifiScreen, NetworkInfo }           from "wifi_screen.slint";
+import { RcDevicesScreen, RcDeviceInfo }     from "rc_devices_screen.slint";
+import { LogScreen, LogEntry }               from "log_screen.slint";
 
 export { NetworkInfo }
+export { RcDeviceInfo }
+export { LogEntry }
 
 export component AppWindow inherits Window {
     width:      1024px;
@@ -10,7 +14,7 @@ export component AppWindow inherits Window {
 
     property <int> current-screen: 0;
 
-    // WiFi state — driven from Rust
+    // ── WiFi state ───────────────────────────────────────────────
     in-out property <[NetworkInfo]> wifi-networks;
     in-out property <int>           wifi-selected-index: -1;
     in-out property <string>        wifi-status: "Инициализация Wi-Fi...";
@@ -27,40 +31,67 @@ export component AppWindow inherits Window {
     callback wifi-cancel-connect();
     callback wifi-password-delete-last();
 
+    // ── RC Devices state ─────────────────────────────────────────
+    in-out property <[RcDeviceInfo]> rc-devices;
+    in-out property <bool>           rc-scanning: false;
+    in-out property <bool>           rc-show-form: false;
+    in-out property <int>            rc-edit-id: 0;
+    in-out property <string>         rc-device-name;
+    in-out property <string>         rc-device-type;
+    in-out property <string>         rc-code-hex;
+    in-out property <string>         rc-protocol;
+    in-out property <int>            rc-bit-count: 0;
+
+    callback rc-scan-start();
+    callback rc-scan-cancel();
+    callback rc-device-save(int, string, string);
+    callback rc-device-delete(int);
+    callback rc-device-name-delete-last();
+
+    // ── Log state ────────────────────────────────────────────────
+    in-out property <[LogEntry]> log-entries;
+    in-out property <int>        log-scroll-to: -1;
+    in-out property <bool>       log-pinned: false;
+
+    callback log-scroll-end();
+    callback log-scroll-start();
+    callback log-toggle-pin();
+
     HorizontalLayout {
         // ── Sidebar ──────────────────────────────────────────────
         Rectangle {
-            width: 56px;
-            background: #010409;
+            width:        56px;
+            background:   #010409;
             border-width: 0;
 
             Rectangle {
-                x: 55px;
-                width: 1px;
+                x:          55px;
+                width:      1px;
                 background: #21262d;
             }
 
             VerticalLayout {
-                padding: 6px;
-                spacing: 4px;
+                padding:   6px;
+                spacing:   4px;
                 alignment: start;
 
-                Rectangle {
-                    height: 44px;
-                    background: root.current-screen == 0 ? #1c2128 : transparent;
+                for item[idx] in [
+                    { label: "WiFi" },
+                    { label: "RF"   },
+                    { label: "Лог"  },
+                ]: Rectangle {
+                    height:        44px;
+                    background:    root.current-screen == idx ? #1c2128 : transparent;
                     border-radius: 8px;
 
                     Text {
-                        text: "WiFi";
-                        font-size: 11px;
-                        color: root.current-screen == 0 ? #58a6ff : #484f58;
+                        text:                 item.label;
+                        font-size:            11px;
+                        color:                root.current-screen == idx ? #58a6ff : #484f58;
                         horizontal-alignment: center;
-                        vertical-alignment: center;
+                        vertical-alignment:   center;
                     }
-
-                    TouchArea {
-                        clicked => { root.current-screen = 0; }
-                    }
+                    TouchArea { clicked => { root.current-screen = idx; } }
                 }
             }
         }
@@ -70,22 +101,55 @@ export component AppWindow inherits Window {
             horizontal-stretch: 1;
 
             WifiScreen {
-                width:           parent.width;
-                height:          parent.height;
-                networks <=>     root.wifi-networks;
-                selected-index <=> root.wifi-selected-index;
-                status <=>       root.wifi-status;
-                password <=>     root.wifi-password;
-                ready <=>        root.wifi-ready;
-                scanning <=>     root.wifi-scanning;
-                connecting <=>   root.wifi-connecting;
-                is-connected <=> root.wifi-is-connected;
-                connected-ssid <=> root.wifi-connected-ssid;
-                connected-ip   <=> root.wifi-connected-ip;
-                scan-requested           => { root.wifi-scan-requested(); }
+                visible:           root.current-screen == 0;
+                width:             parent.width;
+                height:            parent.height;
+                networks         <=> root.wifi-networks;
+                selected-index   <=> root.wifi-selected-index;
+                status           <=> root.wifi-status;
+                password         <=> root.wifi-password;
+                ready            <=> root.wifi-ready;
+                scanning         <=> root.wifi-scanning;
+                connecting       <=> root.wifi-connecting;
+                is-connected     <=> root.wifi-is-connected;
+                connected-ssid   <=> root.wifi-connected-ssid;
+                connected-ip     <=> root.wifi-connected-ip;
+                scan-requested               => { root.wifi-scan-requested(); }
                 connect-requested(ssid, pwd) => { root.wifi-connect-requested(ssid, pwd); }
-                cancel-connect           => { root.wifi-cancel-connect(); }
-                password-delete-last     => { root.wifi-password-delete-last(); }
+                cancel-connect               => { root.wifi-cancel-connect(); }
+                password-delete-last         => { root.wifi-password-delete-last(); }
+            }
+
+            RcDevicesScreen {
+                visible:      root.current-screen == 1;
+                width:        parent.width;
+                height:       parent.height;
+                devices     <=> root.rc-devices;
+                scanning    <=> root.rc-scanning;
+                show-form   <=> root.rc-show-form;
+                edit-id     <=> root.rc-edit-id;
+                device-name <=> root.rc-device-name;
+                device-type <=> root.rc-device-type;
+                code-hex:       root.rc-code-hex;
+                protocol:       root.rc-protocol;
+                bit-count:      root.rc-bit-count;
+                scan-start                  => { root.rc-scan-start(); }
+                scan-cancel                 => { root.rc-scan-cancel(); }
+                device-save(id, name, t)    => { root.rc-device-save(id, name, t); }
+                device-delete(id)           => { root.rc-device-delete(id); }
+                device-name-delete-last     => { root.rc-device-name-delete-last(); }
+            }
+
+            LogScreen {
+                visible:      root.current-screen == 2;
+                width:        parent.width;
+                height:       parent.height;
+                entries     <=> root.log-entries;
+                scroll-to   <=> root.log-scroll-to;
+                pinned      <=> root.log-pinned;
+                scroll-end   => { root.log-scroll-end(); }
+                scroll-start => { root.log-scroll-start(); }
+                toggle-pin   => { root.log-toggle-pin(); }
             }
         }
     }
