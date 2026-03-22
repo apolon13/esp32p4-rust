@@ -97,7 +97,8 @@ impl RcDevicesScreenHandler {
         while let Some(rf) = self.rf_receiver.try_recv() {
             let code = format!("{:X}", rf.code);
             if self.code_bound_this_session(device_id, &code, button_idx) { continue; }
-            self.store.borrow_mut().bind_button(device_id, button_idx, code);
+            self.store.borrow_mut().bind_button(device_id, button_idx, code.clone());
+            Self::set_binding_btn_code(app, button_idx, code.into());
             app.set_rc_binding_button_idx(button_idx as i32 + 1);
             break;
         }
@@ -120,10 +121,12 @@ impl RcDevicesScreenHandler {
         while let Some(rf) = self.rf_receiver.try_recv() {
             if !app.get_rc_scanning() { continue; }
             let candidate = ScanCandidate::from_rf_code(&rf);
-            if self.store.borrow().contains_code(&candidate.code_hex) {
-                log::info!("RF learn: код 0x{} уже есть — пропускаем", candidate.code_hex);
+            let store = self.store.borrow();
+            if store.contains_code(&candidate.code_hex) || store.contains_button_code(&candidate.code_hex) {
+                log::info!("RF learn: код 0x{} уже привязан — пропускаем", candidate.code_hex);
                 continue;
             }
+            drop(store);
             log::info!("RF learn: новый код 0x{} [{}]", candidate.code_hex, candidate.protocol);
             candidate.populate_form(app);
             break;
@@ -140,6 +143,7 @@ impl RcDevicesScreenHandler {
         Self::register_save_callback(app, store);
         Self::register_delete_callback(app, store);
         Self::register_name_delete_last(app);
+        Self::register_binding_load_codes(app, store);
     }
 
     fn register_scan_callbacks(app: &AppWindow) {
@@ -188,6 +192,7 @@ impl RcDevicesScreenHandler {
 
     fn start_binding_if_remote(app: &AppWindow, new_remote: Option<(u32, String)>) {
         if let Some((device_id, device_name)) = new_remote {
+            for i in 0..4 { Self::set_binding_btn_code(app, i, "".into()); }
             app.set_rc_binding_device_id(device_id as i32);
             app.set_rc_binding_device_name(device_name.into());
             app.set_rc_binding_button_idx(0);
@@ -204,6 +209,34 @@ impl RcDevicesScreenHandler {
             st.delete(id as u32);
             Self::sync_devices_to_ui(&app, &st);
         });
+    }
+
+    fn register_binding_load_codes(app: &AppWindow, store: &Rc<RefCell<DeviceStore>>) {
+        let app_weak = app.as_weak();
+        let store    = store.clone();
+        app.on_rc_binding_load_codes(move |device_id| {
+            let app = app_weak.upgrade().unwrap();
+            let st  = store.borrow();
+            if let Some(dev) = st.devices().iter().find(|d| d.id() == device_id as u32) {
+                Self::populate_button_codes(&app, dev);
+            }
+        });
+    }
+
+    fn populate_button_codes(app: &AppWindow, dev: &crate::rc_devices::RfDevice) {
+        for i in 0..4 {
+            Self::set_binding_btn_code(app, i, dev.button(i).unwrap_or("").into());
+        }
+    }
+
+    fn set_binding_btn_code(app: &AppWindow, idx: usize, code: slint::SharedString) {
+        match idx {
+            0 => app.set_rc_binding_btn_code_0(code),
+            1 => app.set_rc_binding_btn_code_1(code),
+            2 => app.set_rc_binding_btn_code_2(code),
+            3 => app.set_rc_binding_btn_code_3(code),
+            _ => {}
+        }
     }
 
     /// DEL-кнопка клавиатуры не умеет нарезать UTF-8 — делаем в Rust.

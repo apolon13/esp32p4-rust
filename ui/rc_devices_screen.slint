@@ -207,12 +207,19 @@ export component RcDevicesScreen {
     in-out property <string> binding-device-name;
     in-out property <int>    binding-button-idx: 0;   // 0..3 = current; 4 = all done
 
+    // Коды кнопок пульта (пусто = не привязана)
+    in-out property <string> binding-btn-code-0;
+    in-out property <string> binding-btn-code-1;
+    in-out property <string> binding-btn-code-2;
+    in-out property <string> binding-btn-code-3;
+
     // ── Callbacks ────────────────────────────────────────────────────
     callback scan-start();
     callback scan-cancel();
     callback device-save(int, string, string);   // id, name, type
     callback device-delete(int);
     callback device-name-delete-last();
+    callback binding-load-codes(int);            // device_id → заполнить binding-btn-code-*
 
     // ── Internal state ───────────────────────────────────────────────
     property <bool>   keyboard-visible:    false;
@@ -585,6 +592,7 @@ export component RcDevicesScreen {
                         }
                         bind-ta := TouchArea {
                             clicked => {
+                                root.binding-load-codes(root.edit-id);
                                 root.binding-device-id   = root.edit-id;
                                 root.binding-device-name = root.device-name;
                                 root.binding-button-idx  = 0;
@@ -687,6 +695,12 @@ export component RcDevicesScreen {
 
                     // Button status list
                     for btn in root.button-items: Rectangle {
+                        property <string> btn-code:
+                            btn.idx == 0 ? root.binding-btn-code-0 :
+                            btn.idx == 1 ? root.binding-btn-code-1 :
+                            btn.idx == 2 ? root.binding-btn-code-2 :
+                                           root.binding-btn-code-3;
+
                         height:        54px;
                         background:    root.binding-button-idx == btn.idx ? #0d2037
                                        : (root.binding-button-idx > btn.idx ? #0d2818 : #161b22);
@@ -712,10 +726,14 @@ export component RcDevicesScreen {
                             }
 
                             Text {
-                                text:               root.binding-button-idx > btn.idx ? "OK"
-                                                    : (root.binding-button-idx == btn.idx ? ">>>" : "");
-                                color:              root.binding-button-idx > btn.idx ? #3fb950 : #1f6feb;
-                                font-size:          13px;
+                                text:               root.binding-button-idx > btn.idx
+                                                        ? (btn-code != "" ? "0x" + btn-code : "OK")
+                                                        : (root.binding-button-idx == btn.idx
+                                                            ? (btn-code != "" ? "0x" + btn-code + " >>>" : ">>>")
+                                                            : (btn-code != "" ? "0x" + btn-code : ""));
+                                color:              root.binding-button-idx > btn.idx ? #3fb950
+                                                    : (root.binding-button-idx == btn.idx ? #58a6ff : #484f58);
+                                font-size:          12px;
                                 font-weight:        700;
                                 vertical-alignment: center;
                             }

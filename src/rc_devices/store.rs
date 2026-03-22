@@ -74,6 +74,11 @@ impl DeviceStore {
         self.devices.iter().any(|d| d.code_hex() == code_hex)
     }
 
+    /// Проверяет, привязан ли код к кнопке любого пульта.
+    pub fn contains_button_code(&self, code: &str) -> bool {
+        self.devices.iter().any(|d| (0..4).any(|i| d.button(i) == Some(code)))
+    }
+
     // ── Мутации ───────────────────────────────────────────────────
 
     /// Добавить новое устройство.

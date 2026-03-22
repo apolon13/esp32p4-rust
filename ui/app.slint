@@ -48,12 +48,17 @@ export component AppWindow inherits Window {
     in-out property <int>    rc-binding-device-id: 0;
     in-out property <string> rc-binding-device-name;
     in-out property <int>    rc-binding-button-idx: 0;
+    in-out property <string> rc-binding-btn-code-0;
+    in-out property <string> rc-binding-btn-code-1;
+    in-out property <string> rc-binding-btn-code-2;
+    in-out property <string> rc-binding-btn-code-3;
 
     callback rc-scan-start();
     callback rc-scan-cancel();
     callback rc-device-save(int, string, string);
     callback rc-device-delete(int);
     callback rc-device-name-delete-last();
+    callback rc-binding-load-codes(int);
 
     // ── Log state ────────────────────────────────────────────────
     in-out property <[LogEntry]> log-entries;
@@ -141,15 +146,20 @@ export component AppWindow inherits Window {
                 code-hex           <=> root.rc-code-hex;
                 protocol           <=> root.rc-protocol;
                 bit-count          <=> root.rc-bit-count;
-                binding-active     <=> root.rc-binding-active;
-                binding-device-id  <=> root.rc-binding-device-id;
+                binding-active      <=> root.rc-binding-active;
+                binding-device-id   <=> root.rc-binding-device-id;
                 binding-device-name <=> root.rc-binding-device-name;
-                binding-button-idx <=> root.rc-binding-button-idx;
+                binding-button-idx  <=> root.rc-binding-button-idx;
+                binding-btn-code-0  <=> root.rc-binding-btn-code-0;
+                binding-btn-code-1  <=> root.rc-binding-btn-code-1;
+                binding-btn-code-2  <=> root.rc-binding-btn-code-2;
+                binding-btn-code-3  <=> root.rc-binding-btn-code-3;
                 scan-start                  => { root.rc-scan-start(); }
                 scan-cancel                 => { root.rc-scan-cancel(); }
                 device-save(id, name, t)    => { root.rc-device-save(id, name, t); }
                 device-delete(id)           => { root.rc-device-delete(id); }
                 device-name-delete-last     => { root.rc-device-name-delete-last(); }
+                binding-load-codes(id)      => { root.rc-binding-load-codes(id); }
             }
 
             LogScreen {
