@@ -1,7 +1,7 @@
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::modem::Modem,
-    nvs::{EspDefaultNvsPartition, EspNvs},
+    nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault},
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
 use std::collections::HashMap;
@@ -39,9 +39,6 @@ pub enum WifiEvent {
 
 // ── WifiWorker ────────────────────────────────────────────────────────────────
 
-/// Handle to the WiFi background thread.
-/// Commands are sent via [`WifiWorker::send`]; results are received via
-/// [`WifiWorker::try_recv`] (non-blocking — call from the render loop).
 pub struct WifiWorker {
     cmd_tx:      SyncSender<WifiCmd>,
     event_rx:    Receiver<WifiEvent>,
@@ -49,49 +46,39 @@ pub struct WifiWorker {
 }
 
 impl WifiWorker {
-    /// Spawn the WiFi worker on a dedicated thread (Core 1 via FreeRTOS).
-    /// All blocking WiFi operations run there; the render loop is never stalled.
-    pub fn spawn(
-        modem:   Modem,
-        sysloop: EspSystemEventLoop,
-        nvs:     EspDefaultNvsPartition,
-    ) -> Self {
+    pub fn spawn(modem: Modem, sysloop: EspSystemEventLoop, nvs: EspDefaultNvsPartition) -> Self {
         let (cmd_tx,   cmd_rx)   = std::sync::mpsc::sync_channel::<WifiCmd>(4);
         let (event_tx, event_rx) = std::sync::mpsc::sync_channel::<WifiEvent>(8);
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        let cancel_worker = cancel_flag.clone();
-
-        // SAFETY: Modem is a singleton peripheral that lives for the entire
-        // program.  We move ownership to the worker thread and never access it
-        // from any other thread.
+        let cancel_flag  = Arc::new(AtomicBool::new(false));
+        let cancel_clone = cancel_flag.clone();
         let modem: Modem<'static> = unsafe { core::mem::transmute(modem) };
-
-        std::thread::Builder::new()
-            .stack_size(16384)
-            .name("wifi_worker".to_string())
-            .spawn(move || worker_loop(modem, sysloop, nvs, cmd_rx, event_tx, cancel_worker))
-            .expect("wifi worker thread spawn failed");
-
+        spawn_worker_thread(modem, sysloop, nvs, cmd_rx, event_tx, cancel_clone);
         Self { cmd_tx, event_rx, cancel_flag }
     }
 
-    /// Try to receive the next event from the worker without blocking.
-    pub fn try_recv(&self) -> Option<WifiEvent> {
-        self.event_rx.try_recv().ok()
-    }
-
-    /// Clone the sender so closures can dispatch commands independently.
-    pub fn cmd_sender(&self) -> SyncSender<WifiCmd> {
-        self.cmd_tx.clone()
-    }
-
-    /// Get a clone of the cancel flag (for use in UI callbacks).
-    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
-        self.cancel_flag.clone()
-    }
+    pub fn try_recv(&self) -> Option<WifiEvent> { self.event_rx.try_recv().ok() }
+    pub fn cmd_sender(&self) -> SyncSender<WifiCmd> { self.cmd_tx.clone() }
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> { self.cancel_flag.clone() }
 }
 
-// ── Worker loop (runs on the dedicated thread) ────────────────────────────────
+// ── Worker thread ─────────────────────────────────────────────────────────────
+
+fn spawn_worker_thread(
+    modem:    Modem<'static>,
+    sysloop:  EspSystemEventLoop,
+    nvs:      EspDefaultNvsPartition,
+    cmd_rx:   Receiver<WifiCmd>,
+    event_tx: SyncSender<WifiEvent>,
+    cancel:   Arc<AtomicBool>,
+) {
+    std::thread::Builder::new()
+        .stack_size(16384)
+        .name("wifi_worker".to_string())
+        .spawn(move || worker_loop(modem, sysloop, nvs, cmd_rx, event_tx, cancel))
+        .expect("wifi worker thread spawn failed");
+}
+
+enum PollResult { Cmd(WifiCmd), Timeout, Disconnected }
 
 fn worker_loop(
     modem:    Modem<'static>,
@@ -102,118 +89,130 @@ fn worker_loop(
     cancel:   Arc<AtomicBool>,
 ) {
     let nvs_creds = nvs.clone();
-
-    let esp_wifi = match EspWifi::new(modem, sysloop.clone(), Some(nvs)) {
-        Ok(w)  => w,
-        Err(e) => {
-            let _ = event_tx.send(WifiEvent::ScanError(format!("WiFi init: {e}")));
-            return;
-        }
-    };
-    let mut wifi = match BlockingWifi::wrap(esp_wifi, sysloop) {
-        Ok(w)  => w,
-        Err(e) => {
-            let _ = event_tx.send(WifiEvent::ScanError(format!("WiFi wrap: {e}")));
-            return;
-        }
-    };
-
+    let mut wifi = match init_wifi(modem, sysloop, nvs, &event_tx) { Some(w) => w, None => return };
     let _ = event_tx.send(WifiEvent::Ready);
-
-    // Auto-connect with stored credentials from previous session
-    let mut is_connected = false;
-    for (ssid, password) in load_all_credentials(&nvs_creds) {
-        log::info!("Trying stored credentials for '{ssid}'…");
-        if do_connect(&mut wifi, &ssid, &password, &cancel, &event_tx) {
-            is_connected = true;
-            break;
-        }
-    }
-
+    let mut connected = auto_connect(&mut wifi, &nvs_creds, &cancel, &event_tx);
     loop {
-        // When connected — poll every 10 s to detect drops and auto-reconnect.
-        // When idle — block until the UI sends a command.
-        let cmd = if is_connected {
-            match cmd_rx.recv_timeout(Duration::from_secs(10)) {
-                Ok(cmd) => Some(cmd),
-                Err(RecvTimeoutError::Timeout) => {
-                    if !wifi.is_connected().unwrap_or(true) {
-                        log::warn!("WiFi connection lost, attempting reconnect…");
-                        is_connected = false;
-                        let _ = event_tx.send(WifiEvent::Disconnected);
-                        for (ssid, pwd) in load_all_credentials(&nvs_creds) {
-                            if do_connect(&mut wifi, &ssid, &pwd, &cancel, &event_tx) {
-                                is_connected = true;
-                                break;
-                            }
-                        }
-                    }
-                    None
-                }
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-        } else {
-            match cmd_rx.recv() {
-                Ok(cmd) => Some(cmd),
-                Err(_) => break,
-            }
-        };
-
-        let Some(cmd) = cmd else { continue };
-
-        match cmd {
-            WifiCmd::Scan => {
-                if !wifi.is_started().unwrap_or(false) {
-                    let _ = wifi.set_configuration(&Configuration::Client(
-                        ClientConfiguration::default(),
-                    ));
-                    let _ = wifi.start();
-                }
-                match wifi.scan() {
-                    Ok(aps) => {
-                        // Deduplicate by SSID — keep the AP with the strongest signal
-                        let mut best: HashMap<String, ScannedNetwork> = HashMap::new();
-                        for ap in aps {
-                            let ssid = ap.ssid.as_str().to_owned();
-                            if ssid.is_empty() { continue; }
-                            let net = ScannedNetwork {
-                                ssid:    ssid.clone(),
-                                rssi:    ap.signal_strength as i32,
-                                secured: ap.auth_method
-                                    .map_or(false, |m| m != AuthMethod::None),
-                            };
-                            best.entry(ssid)
-                                .and_modify(|e| { if net.rssi > e.rssi { *e = net.clone(); } })
-                                .or_insert(net);
-                        }
-                        let mut nets: Vec<ScannedNetwork> = best.into_values().collect();
-                        nets.sort_by(|a, b| b.rssi.cmp(&a.rssi));
-                        let _ = event_tx.send(WifiEvent::ScanResult(nets));
-                    }
-                    Err(e) => { let _ = event_tx.send(WifiEvent::ScanError(e.to_string())); }
-                }
-            }
-
-            WifiCmd::Connect { ssid, password } => {
-                is_connected = do_connect(&mut wifi, &ssid, &password, &cancel, &event_tx);
-                if is_connected {
-                    save_credentials(&nvs_creds, &ssid, &password);
-                }
-            }
-
-            WifiCmd::Disconnect { forget_ssid } => {
-                is_connected = false;
-                let _ = wifi.disconnect();
-                if let Some(ssid) = forget_ssid {
-                    forget_credential(&nvs_creds, &ssid);
-                }
-                let _ = event_tx.send(WifiEvent::Disconnected);
-            }
+        match poll_cmd(&cmd_rx, connected) {
+            PollResult::Disconnected => break,
+            PollResult::Timeout      => connected = watchdog_reconnect(&mut wifi, &nvs_creds, &cancel, &event_tx),
+            PollResult::Cmd(cmd)     => handle_cmd(&mut wifi, cmd, &nvs_creds, &cancel, &event_tx, &mut connected),
         }
     }
 }
 
+fn init_wifi(
+    modem:    Modem<'static>,
+    sysloop:  EspSystemEventLoop,
+    nvs:      EspDefaultNvsPartition,
+    event_tx: &SyncSender<WifiEvent>,
+) -> Option<BlockingWifi<EspWifi<'static>>> {
+    let esp_wifi = match EspWifi::new(modem, sysloop.clone(), Some(nvs)) {
+        Ok(w)  => w,
+        Err(e) => { let _ = event_tx.send(WifiEvent::ScanError(format!("WiFi init: {e}"))); return None; }
+    };
+    match BlockingWifi::wrap(esp_wifi, sysloop) {
+        Ok(w)  => Some(w),
+        Err(e) => { let _ = event_tx.send(WifiEvent::ScanError(format!("WiFi wrap: {e}"))); None }
+    }
+}
+
+fn auto_connect(
+    wifi:      &mut BlockingWifi<EspWifi<'static>>,
+    nvs_creds: &EspDefaultNvsPartition,
+    cancel:    &AtomicBool,
+    event_tx:  &SyncSender<WifiEvent>,
+) -> bool {
+    for (ssid, password) in load_all_credentials(nvs_creds) {
+        log::info!("Trying stored credentials for '{ssid}'…");
+        if do_connect(wifi, &ssid, &password, cancel, event_tx) { return true; }
+    }
+    false
+}
+
+fn watchdog_reconnect(
+    wifi:      &mut BlockingWifi<EspWifi<'static>>,
+    nvs_creds: &EspDefaultNvsPartition,
+    cancel:    &AtomicBool,
+    event_tx:  &SyncSender<WifiEvent>,
+) -> bool {
+    if wifi.is_connected().unwrap_or(true) { return true; }
+    log::warn!("WiFi connection lost, attempting reconnect…");
+    let _ = event_tx.send(WifiEvent::Disconnected);
+    auto_connect(wifi, nvs_creds, cancel, event_tx)
+}
+
+fn poll_cmd(cmd_rx: &Receiver<WifiCmd>, is_connected: bool) -> PollResult {
+    if is_connected {
+        match cmd_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(cmd) => PollResult::Cmd(cmd),
+            Err(RecvTimeoutError::Timeout)      => PollResult::Timeout,
+            Err(RecvTimeoutError::Disconnected) => PollResult::Disconnected,
+        }
+    } else {
+        match cmd_rx.recv() {
+            Ok(cmd) => PollResult::Cmd(cmd),
+            Err(_)  => PollResult::Disconnected,
+        }
+    }
+}
+
+fn handle_cmd(
+    wifi:      &mut BlockingWifi<EspWifi<'static>>,
+    cmd:       WifiCmd,
+    nvs_creds: &EspDefaultNvsPartition,
+    cancel:    &AtomicBool,
+    event_tx:  &SyncSender<WifiEvent>,
+    connected: &mut bool,
+) {
+    match cmd {
+        WifiCmd::Scan                          => do_scan(wifi, event_tx),
+        WifiCmd::Connect { ssid, password }    => {
+            *connected = do_connect(wifi, &ssid, &password, cancel, event_tx);
+            if *connected { save_credentials(nvs_creds, &ssid, &password); }
+        }
+        WifiCmd::Disconnect { forget_ssid } => {
+            *connected = false;
+            let _ = wifi.disconnect();
+            if let Some(ssid) = forget_ssid { forget_credential(nvs_creds, &ssid); }
+            let _ = event_tx.send(WifiEvent::Disconnected);
+        }
+    }
+}
+
+// ── Scan ─────────────────────────────────────────────────────────────────────
+
+fn do_scan(wifi: &mut BlockingWifi<EspWifi<'static>>, event_tx: &SyncSender<WifiEvent>) {
+    if !wifi.is_started().unwrap_or(false) {
+        let _ = wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()));
+        let _ = wifi.start();
+    }
+    match wifi.scan() {
+        Ok(aps) => { let _ = event_tx.send(WifiEvent::ScanResult(deduplicate_aps(aps))); }
+        Err(e)  => { let _ = event_tx.send(WifiEvent::ScanError(e.to_string())); }
+    }
+}
+
+fn deduplicate_aps(aps: Vec<esp_idf_svc::wifi::AccessPointInfo>) -> Vec<ScannedNetwork> {
+    let mut best: HashMap<String, ScannedNetwork> = HashMap::new();
+    for ap in aps {
+        let ssid = ap.ssid.as_str().to_owned();
+        if ssid.is_empty() { continue; }
+        let net = ScannedNetwork {
+            ssid:    ssid.clone(),
+            rssi:    ap.signal_strength as i32,
+            secured: ap.auth_method.map_or(false, |m| m != AuthMethod::None),
+        };
+        best.entry(ssid).and_modify(|e| { if net.rssi > e.rssi { *e = net.clone(); } }).or_insert(net);
+    }
+    let mut nets: Vec<ScannedNetwork> = best.into_values().collect();
+    nets.sort_by(|a, b| b.rssi.cmp(&a.rssi));
+    nets
+}
+
 // ── Connect with retries ─────────────────────────────────────────────────────
+
+enum AttemptResult { Connected, Cancelled, Failed(String) }
 
 fn do_connect(
     wifi:     &mut BlockingWifi<EspWifi<'static>>,
@@ -223,69 +222,80 @@ fn do_connect(
     event_tx: &SyncSender<WifiEvent>,
 ) -> bool {
     cancel.store(false, Ordering::Relaxed);
+    let (connected, cancelled, last_err) = connect_loop(wifi, ssid, password, cancel, event_tx);
+    report_connect_result(wifi, ssid, connected, cancelled, &last_err, event_tx)
+}
 
+fn connect_loop(
+    wifi:     &mut BlockingWifi<EspWifi<'static>>,
+    ssid:     &str,
+    password: &str,
+    cancel:   &AtomicBool,
+    event_tx: &SyncSender<WifiEvent>,
+) -> (bool, bool, String) {
     const MAX: u8 = 3;
-    let mut connected = false;
-    let mut cancelled = false;
-    let mut last_err  = String::new();
-
+    let mut last_err = String::new();
     for attempt in 1..=MAX {
-        if cancel.load(Ordering::Relaxed) {
-            cancelled = true;
-            break;
+        if cancel.load(Ordering::Relaxed) { return (false, true, last_err); }
+        let _ = event_tx.send(WifiEvent::Connecting { ssid: ssid.to_owned(), attempt, max: MAX });
+        match attempt_once(wifi, ssid, password, cancel) {
+            AttemptResult::Connected   => return (true, false, last_err),
+            AttemptResult::Cancelled   => return (false, true, last_err),
+            AttemptResult::Failed(err) => { let _ = wifi.disconnect(); last_err = err; }
         }
-        let _ = event_tx.send(WifiEvent::Connecting {
-            ssid: ssid.to_owned(), attempt, max: MAX,
-        });
-        let _ = wifi.set_configuration(&Configuration::Client(
-            ClientConfiguration {
-                ssid:     ssid.try_into().unwrap_or_default(),
-                password: password.try_into().unwrap_or_default(),
-                ..Default::default()
-            },
-        ));
-        if !wifi.is_started().unwrap_or(false) {
-            let _ = wifi.start();
-        }
-        match wifi.connect() {
-            Ok(()) if cancel.load(Ordering::Relaxed) => {
-                cancelled = true;
-                let _ = wifi.disconnect();
-                break;
-            }
-            Ok(()) if wifi.wait_netif_up().is_ok() => {
-                if cancel.load(Ordering::Relaxed) {
-                    cancelled = true;
-                    let _ = wifi.disconnect();
-                    break;
-                }
-                connected = true;
-                break;
-            }
-            Ok(()) => { last_err = friendly_error("netif did not come up"); }
-            Err(e) => { last_err = friendly_error(&e.to_string()); }
-        }
-        let _ = wifi.disconnect();
     }
+    (false, false, last_err)
+}
 
+fn attempt_once(
+    wifi:     &mut BlockingWifi<EspWifi<'static>>,
+    ssid:     &str,
+    password: &str,
+    cancel:   &AtomicBool,
+) -> AttemptResult {
+    let _ = wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+        ssid:     ssid.try_into().unwrap_or_default(),
+        password: password.try_into().unwrap_or_default(),
+        ..Default::default()
+    }));
+    if !wifi.is_started().unwrap_or(false) { let _ = wifi.start(); }
+    match wifi.connect() {
+        Ok(()) if cancel.load(Ordering::Relaxed) => { let _ = wifi.disconnect(); AttemptResult::Cancelled }
+        Ok(()) if wifi.wait_netif_up().is_ok() => {
+            if cancel.load(Ordering::Relaxed) { let _ = wifi.disconnect(); return AttemptResult::Cancelled; }
+            AttemptResult::Connected
+        }
+        Ok(()) => AttemptResult::Failed(friendly_error("netif did not come up")),
+        Err(e) => AttemptResult::Failed(friendly_error(&e.to_string())),
+    }
+}
+
+fn report_connect_result(
+    wifi:      &mut BlockingWifi<EspWifi<'static>>,
+    ssid:      &str,
+    connected: bool,
+    cancelled: bool,
+    last_err:  &str,
+    event_tx:  &SyncSender<WifiEvent>,
+) -> bool {
     if cancelled {
         let _ = wifi.disconnect();
-        let _ = event_tx.send(WifiEvent::ConnectError(
-            "Отменено пользователем".to_owned(),
-        ));
+        let _ = event_tx.send(WifiEvent::ConnectError("Отменено пользователем".to_owned()));
         false
     } else if connected {
-        let ip = wifi.wifi().sta_netif()
-            .get_ip_info()
-            .map(|info| format!("{}", info.ip))
-            .unwrap_or_default();
-        let ip = if ip == "0.0.0.0" { String::new() } else { ip };
-        let _ = event_tx.send(WifiEvent::Connected { ssid: ssid.to_owned(), ip });
+        let _ = event_tx.send(WifiEvent::Connected { ssid: ssid.to_owned(), ip: get_ip(wifi) });
         true
     } else {
-        let _ = event_tx.send(WifiEvent::ConnectError(last_err));
+        let _ = event_tx.send(WifiEvent::ConnectError(last_err.to_owned()));
         false
     }
+}
+
+fn get_ip(wifi: &BlockingWifi<EspWifi<'static>>) -> String {
+    let ip = wifi.wifi().sta_netif().get_ip_info()
+        .map(|info| format!("{}", info.ip))
+        .unwrap_or_default();
+    if ip == "0.0.0.0" { String::new() } else { ip }
 }
 
 // ── Human-readable WiFi errors ───────────────────────────────────────────────
@@ -313,41 +323,53 @@ fn friendly_error(raw: &str) -> String {
 const MAX_STORED: usize = 5;
 
 fn load_all_credentials(nvs: &EspDefaultNvsPartition) -> Vec<(String, String)> {
-    let nvs_handle = match EspNvs::new(nvs.clone(), "wifi_cred", true) {
-        Ok(h) => h,
+    let h = match EspNvs::new(nvs.clone(), "wifi_cred", true) {
+        Ok(h)  => h,
         Err(_) => return Vec::new(),
     };
+    load_from_new_format(&h).unwrap_or_else(|| load_from_old_format(&h))
+}
 
-    if let Some(count) = nvs_handle.get_u8("count").ok().flatten() {
-        let n = (count as usize).min(MAX_STORED);
-        let mut creds = Vec::with_capacity(n);
-        for i in 0..n {
-            let sk = format!("s{i}");
-            let pk = format!("p{i}");
-            let mut sbuf = [0u8; 64];
-            let mut pbuf = [0u8; 128];
-            if let (Some(s), Some(p)) = (
-                nvs_handle.get_str(&sk, &mut sbuf).ok().flatten(),
-                nvs_handle.get_str(&pk, &mut pbuf).ok().flatten(),
-            ) {
-                creds.push((s.to_string(), p.to_string()));
-            }
+fn load_from_new_format(h: &EspNvs<NvsDefault>) -> Option<Vec<(String, String)>> {
+    let count = h.get_u8("count").ok().flatten()?;
+    let n = (count as usize).min(MAX_STORED);
+    let mut creds = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut sbuf = [0u8; 64];
+        let mut pbuf = [0u8; 128];
+        if let (Some(s), Some(p)) = (
+            h.get_str(&format!("s{i}"), &mut sbuf).ok().flatten(),
+            h.get_str(&format!("p{i}"), &mut pbuf).ok().flatten(),
+        ) {
+            creds.push((s.to_string(), p.to_string()));
         }
-        return creds;
     }
+    Some(creds)
+}
 
-    // Backward compatibility: read old single-credential keys
+fn load_from_old_format(h: &EspNvs<NvsDefault>) -> Vec<(String, String)> {
     let mut sbuf = [0u8; 64];
     let mut pbuf = [0u8; 128];
     if let (Some(s), Some(p)) = (
-        nvs_handle.get_str("ssid", &mut sbuf).ok().flatten(),
-        nvs_handle.get_str("pwd", &mut pbuf).ok().flatten(),
+        h.get_str("ssid", &mut sbuf).ok().flatten(),
+        h.get_str("pwd",  &mut pbuf).ok().flatten(),
     ) {
-        if !s.is_empty() {
-            return vec![(s.to_string(), p.to_string())];
-        }
+        if !s.is_empty() { return vec![(s.to_string(), p.to_string())]; }
     }
     Vec::new()
+}
+
+fn write_credentials(nvs: &EspDefaultNvsPartition, creds: &[(String, String)]) {
+    match EspNvs::new(nvs.clone(), "wifi_cred", true) {
+        Ok(h) => {
+            let _ = h.set_u8("count", creds.len() as u8);
+            for (i, (s, p)) in creds.iter().enumerate() {
+                let _ = h.set_str(&format!("s{i}"), s);
+                let _ = h.set_str(&format!("p{i}"), p);
+            }
+        }
+        Err(e) => log::warn!("Failed to open NVS for credential storage: {e}"),
+    }
 }
 
 fn save_credentials(nvs: &EspDefaultNvsPartition, ssid: &str, password: &str) {
@@ -355,36 +377,15 @@ fn save_credentials(nvs: &EspDefaultNvsPartition, ssid: &str, password: &str) {
     existing.retain(|(s, _)| s != ssid);
     existing.insert(0, (ssid.to_owned(), password.to_owned()));
     existing.truncate(MAX_STORED);
-
-    match EspNvs::new(nvs.clone(), "wifi_cred", true) {
-        Ok(h) => {
-            let _ = h.set_u8("count", existing.len() as u8);
-            for (i, (s, p)) in existing.iter().enumerate() {
-                let _ = h.set_str(&format!("s{i}"), s);
-                let _ = h.set_str(&format!("p{i}"), p);
-            }
-            log::info!("WiFi credentials saved for '{ssid}' ({} total)", existing.len());
-        }
-        Err(e) => log::warn!("Failed to open NVS for credential storage: {e}"),
-    }
+    write_credentials(nvs, &existing);
+    log::info!("WiFi credentials saved for '{ssid}' ({} total)", existing.len());
 }
 
 fn forget_credential(nvs: &EspDefaultNvsPartition, ssid: &str) {
     let mut existing = load_all_credentials(nvs);
     let before = existing.len();
     existing.retain(|(s, _)| s != ssid);
-    if existing.len() == before {
-        return; // SSID не был сохранён
-    }
-    match EspNvs::new(nvs.clone(), "wifi_cred", true) {
-        Ok(h) => {
-            let _ = h.set_u8("count", existing.len() as u8);
-            for (i, (s, p)) in existing.iter().enumerate() {
-                let _ = h.set_str(&format!("s{i}"), s);
-                let _ = h.set_str(&format!("p{i}"), p);
-            }
-            log::info!("WiFi: забыта сеть '{ssid}' (осталось {})", existing.len());
-        }
-        Err(e) => log::warn!("Failed to open NVS to forget credential: {e}"),
-    }
+    if existing.len() == before { return; }
+    write_credentials(nvs, &existing);
+    log::info!("WiFi: забыта сеть '{ssid}' (осталось {})", existing.len());
 }

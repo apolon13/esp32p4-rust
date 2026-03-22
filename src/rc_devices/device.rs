@@ -83,6 +83,7 @@ impl DeviceType {
 // Публичных сеттеров нет. Изменение атрибутов — через методы `with_*`,
 // которые возвращают новый экземпляр (value-object pattern).
 
+
 #[derive(Clone, Debug)]
 pub struct RfDevice {
     id:          u32,
@@ -91,6 +92,9 @@ pub struct RfDevice {
     code_hex:    String,
     protocol:    String,
     bit_count:   u8,
+    /// Коды 4 кнопок пульта (только для DeviceType::Remote).
+    /// Индексы 0-3 соответствуют BUTTON_NAMES.
+    buttons:     [Option<String>; 4],
 }
 
 impl RfDevice {
@@ -106,7 +110,8 @@ impl RfDevice {
     ) -> Self {
         debug_assert!(id > 0,               "device id must be positive");
         debug_assert!(!code_hex.is_empty(), "code_hex must not be empty");
-        Self { id, name, device_type, code_hex, protocol, bit_count }
+        Self { id, name, device_type, code_hex, protocol, bit_count,
+               buttons: [None, None, None, None] }
     }
 
     // ── Getters ──────────────────────────────────────────────────
@@ -117,6 +122,11 @@ impl RfDevice {
     pub fn protocol(&self)    -> &str        { &self.protocol }
     pub fn bit_count(&self)   -> u8          { self.bit_count }
 
+    /// Код кнопки пульта по индексу 0-3. `None` — кнопка не привязана.
+    pub fn button(&self, idx: usize) -> Option<&str> {
+        self.buttons.get(idx)?.as_deref()
+    }
+
     // ── "Builder" методы (возвращают новый объект) ────────────────
     pub fn with_name(self, name: impl Into<String>) -> Self {
         Self { name: name.into(), ..self }
@@ -124,5 +134,11 @@ impl RfDevice {
 
     pub fn with_type(self, device_type: DeviceType) -> Self {
         Self { device_type, ..self }
+    }
+
+    pub fn with_button(self, idx: usize, code: String) -> Self {
+        let mut s = self;
+        if idx < 4 { s.buttons[idx] = Some(code); }
+        s
     }
 }

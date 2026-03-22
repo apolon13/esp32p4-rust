@@ -43,6 +43,12 @@ export component AppWindow inherits Window {
     in-out property <string>         rc-protocol;
     in-out property <int>            rc-bit-count: 0;
 
+    // ── RC Binding state ─────────────────────────────────────────
+    in-out property <bool>   rc-binding-active: false;
+    in-out property <int>    rc-binding-device-id: 0;
+    in-out property <string> rc-binding-device-name;
+    in-out property <int>    rc-binding-button-idx: 0;
+
     callback rc-scan-start();
     callback rc-scan-cancel();
     callback rc-device-save(int, string, string);
@@ -123,18 +129,22 @@ export component AppWindow inherits Window {
             }
 
             RcDevicesScreen {
-                visible:      root.current-screen == 1;
-                width:        parent.width;
-                height:       parent.height;
-                devices     <=> root.rc-devices;
-                scanning    <=> root.rc-scanning;
-                show-form   <=> root.rc-show-form;
-                edit-id     <=> root.rc-edit-id;
-                device-name <=> root.rc-device-name;
-                device-type <=> root.rc-device-type;
-                code-hex    <=> root.rc-code-hex;
-                protocol    <=> root.rc-protocol;
-                bit-count   <=> root.rc-bit-count;
+                visible:             root.current-screen == 1;
+                width:               parent.width;
+                height:              parent.height;
+                devices            <=> root.rc-devices;
+                scanning           <=> root.rc-scanning;
+                show-form          <=> root.rc-show-form;
+                edit-id            <=> root.rc-edit-id;
+                device-name        <=> root.rc-device-name;
+                device-type        <=> root.rc-device-type;
+                code-hex           <=> root.rc-code-hex;
+                protocol           <=> root.rc-protocol;
+                bit-count          <=> root.rc-bit-count;
+                binding-active     <=> root.rc-binding-active;
+                binding-device-id  <=> root.rc-binding-device-id;
+                binding-device-name <=> root.rc-binding-device-name;
+                binding-button-idx <=> root.rc-binding-button-idx;
                 scan-start                  => { root.rc-scan-start(); }
                 scan-cancel                 => { root.rc-scan-cancel(); }
                 device-save(id, name, t)    => { root.rc-device-save(id, name, t); }

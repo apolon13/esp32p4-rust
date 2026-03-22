@@ -201,6 +201,12 @@ export component RcDevicesScreen {
     in-out property <string> protocol;
     in-out property <int>    bit-count: 0;
 
+    // ── Button binding state ─────────────────────────────────────────
+    in-out property <bool>   binding-active: false;
+    in-out property <int>    binding-device-id: 0;
+    in-out property <string> binding-device-name;
+    in-out property <int>    binding-button-idx: 0;   // 0..3 = current; 4 = all done
+
     // ── Callbacks ────────────────────────────────────────────────────
     callback scan-start();
     callback scan-cancel();
@@ -217,13 +223,20 @@ export component RcDevicesScreen {
         "Датчик", "Пульт", "Движение", "Гараж", "Дым/Газ", "Другое"
     ];
 
+    property <[{name: string, idx: int}]> button-items: [
+        { name: "Охрана",         idx: 0 },
+        { name: "Снять с охраны", idx: 1 },
+        { name: "Без звука",      idx: 2 },
+        { name: "Тревога",        idx: 3 },
+    ];
+
     // ════════════════════════════════════════════════════════════════
     Rectangle {
         clip: true;
 
         // ══ PAGE 1 — Device list ══════════════════════════════════════
         Rectangle {
-            x:          root.show-form ? -parent.width : 0px;
+            x:          (root.show-form || root.binding-active) ? -parent.width : 0px;
             width:      parent.width;
             height:     parent.height;
             background: #0d1117;
@@ -378,9 +391,9 @@ export component RcDevicesScreen {
             }
         }
 
-        // ══ PAGE 2 — Edit / Add form ══════════════════════════════════ ══════════════════════════════════
+        // ══ PAGE 2 — Edit / Add form ═════════════════════════════════
         Rectangle {
-            x:          root.show-form ? 0px : parent.width;
+            x:          root.binding-active ? -parent.width : (root.show-form ? 0px : parent.width);
             width:      parent.width;
             height:     parent.height;
             background: #0d1117;
@@ -553,6 +566,34 @@ export component RcDevicesScreen {
                         }
                     }
 
+                    // Bind buttons — only for existing Remote devices
+                    if !root.keyboard-visible && root.edit-id != 0 && root.device-type == "Пульт": Rectangle {
+                        height:        52px;
+                        background:    bind-ta.has-hover ? #1a3a5c : #0d2037;
+                        border-radius: 10px;
+                        border-width:  1px;
+                        border-color:  #1f6feb;
+                        animate background { duration: 100ms; }
+
+                        Text {
+                            text:                 "Привязать кнопки пульта";
+                            color:                #58a6ff;
+                            font-size:            16px;
+                            font-weight:          700;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                        }
+                        bind-ta := TouchArea {
+                            clicked => {
+                                root.binding-device-id   = root.edit-id;
+                                root.binding-device-name = root.device-name;
+                                root.binding-button-idx  = 0;
+                                root.show-form           = false;
+                                root.binding-active      = true;
+                            }
+                        }
+                    }
+
                     // Delete button — only for existing devices
                     if !root.keyboard-visible && root.edit-id != 0: Rectangle {
                         height:        52px;
@@ -574,6 +615,188 @@ export component RcDevicesScreen {
                             clicked => {
                                 root.confirm-delete-id   = root.edit-id;
                                 root.confirm-delete-name = root.device-name;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ══ PAGE 3 — Button binding ═══════════════════════════════════
+        Rectangle {
+            x:          root.binding-active ? 0px : parent.width;
+            width:      parent.width;
+            height:     parent.height;
+            background: #0d1117;
+            animate x { duration: 300ms; easing: ease-out; }
+
+            // ── Header ─────────────────────────────────────────────
+            Rectangle {
+                y:          0;
+                height:     56px;
+                background: #161b22;
+
+                HorizontalLayout {
+                    padding-left:  20px;
+                    padding-right: 16px;
+                    spacing:       8px;
+
+                    Text {
+                        text:               "Пульт: " + root.binding-device-name;
+                        color:              #e6edf3;
+                        font-size:          17px;
+                        font-weight:        700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow:           elide;
+                    }
+
+                    Rectangle {
+                        width:         96px;
+                        height:        36px;
+                        background:    bdone-ta.has-hover ? #2d333b : #21262d;
+                        border-radius: 6px;
+                        border-width:  1px;
+                        border-color:  #30363d;
+                        animate background { duration: 100ms; }
+
+                        Text {
+                            text:                 "Готово";
+                            color:                #8b949e;
+                            font-size:            13px;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                        }
+                        bdone-ta := TouchArea {
+                            clicked => { root.binding-active = false; }
+                        }
+                    }
+                }
+            }
+
+            // ── Body ───────────────────────────────────────────────
+            Rectangle {
+                y:          56px;
+                height:     parent.height - 56px;
+                background: #0d1117;
+
+                VerticalLayout {
+                    padding:   20px;
+                    spacing:   10px;
+                    alignment: center;
+
+                    // Button status list
+                    for btn in root.button-items: Rectangle {
+                        height:        54px;
+                        background:    root.binding-button-idx == btn.idx ? #0d2037
+                                       : (root.binding-button-idx > btn.idx ? #0d2818 : #161b22);
+                        border-radius: 10px;
+                        border-width:  1px;
+                        border-color:  root.binding-button-idx == btn.idx ? #1f6feb
+                                       : (root.binding-button-idx > btn.idx ? #238636 : #30363d);
+                        animate background   { duration: 150ms; }
+                        animate border-color { duration: 150ms; }
+
+                        HorizontalLayout {
+                            padding-left:  18px;
+                            padding-right: 18px;
+
+                            Text {
+                                text:               (btn.idx + 1) + ". " + btn.name;
+                                color:              root.binding-button-idx == btn.idx ? #58a6ff
+                                                    : (root.binding-button-idx > btn.idx ? #3fb950 : #484f58);
+                                font-size:          15px;
+                                font-weight:        600;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+
+                            Text {
+                                text:               root.binding-button-idx > btn.idx ? "OK"
+                                                    : (root.binding-button-idx == btn.idx ? ">>>" : "");
+                                color:              root.binding-button-idx > btn.idx ? #3fb950 : #1f6feb;
+                                font-size:          13px;
+                                font-weight:        700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Scanning prompt (while there are buttons left to bind)
+                    if root.binding-button-idx < 4: VerticalLayout {
+                        spacing: 14px;
+                        padding-top: 10px;
+
+                        Text {
+                            text:                 "Нажмите кнопку на пульте";
+                            color:                #58a6ff;
+                            font-size:            14px;
+                            font-weight:          600;
+                            horizontal-alignment: center;
+                        }
+
+                        ScanDots { running: root.binding-active && root.binding-button-idx < 4; }
+
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width:         160px;
+                                height:        44px;
+                                background:    skip-ta.has-hover ? #2d333b : #21262d;
+                                border-radius: 8px;
+                                border-width:  1px;
+                                border-color:  #30363d;
+                                animate background { duration: 100ms; }
+
+                                Text {
+                                    text:                 "Пропустить";
+                                    color:                #8b949e;
+                                    font-size:            14px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment:   center;
+                                }
+                                skip-ta := TouchArea {
+                                    clicked => {
+                                        root.binding-button-idx = root.binding-button-idx + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Completion message (all 4 buttons bound or skipped)
+                    if root.binding-button-idx >= 4: VerticalLayout {
+                        spacing:    16px;
+                        padding-top: 10px;
+
+                        Text {
+                            text:                 "Привязка завершена!";
+                            color:                #3fb950;
+                            font-size:            16px;
+                            font-weight:          700;
+                            horizontal-alignment: center;
+                        }
+
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width:         200px;
+                                height:        48px;
+                                background:    finish-ta.has-hover ? #2ea043 : #238636;
+                                border-radius: 10px;
+                                animate background { duration: 100ms; }
+
+                                Text {
+                                    text:                 "Завершить";
+                                    color:                #ffffff;
+                                    font-size:            15px;
+                                    font-weight:          700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment:   center;
+                                }
+                                finish-ta := TouchArea {
+                                    clicked => { root.binding-active = false; }
+                                }
                             }
                         }
                     }

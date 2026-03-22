@@ -68,36 +68,67 @@ pub struct RcDevicesScreenHandler {
 impl RcDevicesScreenHandler {
     pub fn new(app: &AppWindow, rf_receiver: RfReceiver, store: DeviceStore) -> Self {
         let store = Rc::new(RefCell::new(store));
-
         Self::sync_devices_to_ui(app, &store.borrow());
         Self::register_callbacks(app, &store);
-
         Self { rf_receiver, app: app.as_weak(), store }
     }
 
     /// Дренирует входящие RF-коды и обновляет UI.  Не блокируется.
     pub fn poll(&self) {
         let Some(app) = self.app.upgrade() else { return };
+        if self.poll_binding(&app) { return; }
+        self.poll_scan(&app);
+    }
 
+    // ── Приватные методы ──────────────────────────────────────────
+
+    /// Обрабатывает режим привязки. Возвращает `true`, если привязка активна.
+    fn poll_binding(&self, app: &AppWindow) -> bool {
+        if !app.get_rc_binding_active() { return false; }
+        let button_idx = app.get_rc_binding_button_idx() as usize;
+        if button_idx < 4 {
+            let device_id = app.get_rc_binding_device_id() as u32;
+            self.try_bind_button(app, device_id, button_idx);
+        }
+        true
+    }
+
+    fn try_bind_button(&self, app: &AppWindow, device_id: u32, button_idx: usize) {
         while let Some(rf) = self.rf_receiver.try_recv() {
-            if !app.get_rc_scanning() {
-                continue; // не в режиме обучения
-            }
+            let code = format!("{:X}", rf.code);
+            if self.code_bound_this_session(device_id, &code, button_idx) { continue; }
+            self.store.borrow_mut().bind_button(device_id, button_idx, code);
+            app.set_rc_binding_button_idx(button_idx as i32 + 1);
+            break;
+        }
+    }
 
+    /// Проверяет, использован ли код в текущей сессии привязки (кнопки 0..button_idx).
+    /// Игнорирует ранее сохранённые коды для кнопок начиная с button_idx —
+    /// иначе повторная привязка пульта никогда не принимала бы прежние коды.
+    fn code_bound_this_session(&self, device_id: u32, code: &str, current_idx: usize) -> bool {
+        self.store.borrow()
+            .devices()
+            .iter()
+            .find(|d| d.id() == device_id)
+            .map_or(false, |dev| {
+                (0..current_idx).any(|i| dev.button(i).map_or(false, |c| c == code))
+            })
+    }
+
+    fn poll_scan(&self, app: &AppWindow) {
+        while let Some(rf) = self.rf_receiver.try_recv() {
+            if !app.get_rc_scanning() { continue; }
             let candidate = ScanCandidate::from_rf_code(&rf);
-
             if self.store.borrow().contains_code(&candidate.code_hex) {
                 log::info!("RF learn: код 0x{} уже есть — пропускаем", candidate.code_hex);
                 continue;
             }
-
             log::info!("RF learn: новый код 0x{} [{}]", candidate.code_hex, candidate.protocol);
-            candidate.populate_form(&app);
-            break; // обрабатываем один код за кадр
+            candidate.populate_form(app);
+            break;
         }
     }
-
-    // ── Приватные методы ──────────────────────────────────────────
 
     fn sync_devices_to_ui(app: &AppWindow, store: &DeviceStore) {
         let items: Vec<RcDeviceInfo> = store.devices().iter().map(to_slint).collect();
@@ -112,48 +143,56 @@ impl RcDevicesScreenHandler {
     }
 
     fn register_scan_callbacks(app: &AppWindow) {
-        {
-            let app_weak = app.as_weak();
-            app.on_rc_scan_start(move || {
-                app_weak.upgrade().unwrap().set_rc_scanning(true);
-            });
-        }
-        {
-            let app_weak = app.as_weak();
-            app.on_rc_scan_cancel(move || {
-                app_weak.upgrade().unwrap().set_rc_scanning(false);
-            });
-        }
+        let app_weak = app.as_weak();
+        app.on_rc_scan_start(move || { app_weak.upgrade().unwrap().set_rc_scanning(true); });
+        let app_weak = app.as_weak();
+        app.on_rc_scan_cancel(move || { app_weak.upgrade().unwrap().set_rc_scanning(false); });
     }
 
-    /// `id == 0` → добавить новое устройство (код/протокол/биты берём из UI-свойств).
-    /// `id  > 0` → обновить имя и тип существующего устройства.
     fn register_save_callback(app: &AppWindow, store: &Rc<RefCell<DeviceStore>>) {
         let app_weak = app.as_weak();
         let store    = store.clone();
         app.on_rc_device_save(move |id, name, type_str| {
             let app   = app_weak.upgrade().unwrap();
             let dtype = DeviceType::from_str(type_str.as_str());
-            let mut st = store.borrow_mut();
-
-            if id == 0 {
-                let _ = st.add(
-                    name.as_str(),
-                    dtype,
-                    app.get_rc_code_hex().as_str(),
-                    app.get_rc_protocol().as_str(),
-                    app.get_rc_bit_count() as u8,
-                );
-            } else if let Some(device) = st.devices()
-                .iter()
-                .find(|d| d.id() == id as u32)
-                .cloned()
-            {
-                st.update(device.with_name(name.as_str()).with_type(dtype));
-            }
-
-            Self::sync_devices_to_ui(&app, &st);
+            let new_remote = Self::apply_save(&app, &store, id, &name, dtype);
+            Self::sync_devices_to_ui(&app, &store.borrow());
+            Self::start_binding_if_remote(&app, new_remote);
         });
+    }
+
+    /// Применяет сохранение: добавляет или обновляет устройство.
+    /// Возвращает `Some((id, name))` если добавлен новый Remote.
+    fn apply_save(
+        app:   &AppWindow,
+        store: &Rc<RefCell<DeviceStore>>,
+        id:    i32,
+        name:  &slint::SharedString,
+        dtype: DeviceType,
+    ) -> Option<(u32, String)> {
+        let mut st = store.borrow_mut();
+        if id == 0 {
+            st.add(name.as_str(), dtype,
+                   app.get_rc_code_hex().as_str(),
+                   app.get_rc_protocol().as_str(),
+                   app.get_rc_bit_count() as u8)
+                .filter(|_| dtype == DeviceType::Remote)
+                .map(|d| (d.id(), d.name().to_owned()))
+        } else {
+            if let Some(dev) = st.devices().iter().find(|d| d.id() == id as u32).cloned() {
+                st.update(dev.with_name(name.as_str()).with_type(dtype));
+            }
+            None
+        }
+    }
+
+    fn start_binding_if_remote(app: &AppWindow, new_remote: Option<(u32, String)>) {
+        if let Some((device_id, device_name)) = new_remote {
+            app.set_rc_binding_device_id(device_id as i32);
+            app.set_rc_binding_device_name(device_name.into());
+            app.set_rc_binding_button_idx(0);
+            app.set_rc_binding_active(true);
+        }
     }
 
     fn register_delete_callback(app: &AppWindow, store: &Rc<RefCell<DeviceStore>>) {
