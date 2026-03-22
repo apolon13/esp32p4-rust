@@ -197,9 +197,9 @@ export component RcDevicesScreen {
     in-out property <int>    edit-id: 0;       // 0 = new device
     in-out property <string> device-name;
     in-out property <string> device-type;
-    in     property <string> code-hex;
-    in     property <string> protocol;
-    in     property <int>    bit-count: 0;
+    in-out property <string> code-hex;
+    in-out property <string> protocol;
+    in-out property <int>    bit-count: 0;
 
     // ── Callbacks ────────────────────────────────────────────────────
     callback scan-start();
@@ -209,7 +209,9 @@ export component RcDevicesScreen {
     callback device-name-delete-last();
 
     // ── Internal state ───────────────────────────────────────────────
-    property <bool> keyboard-visible: false;
+    property <bool>   keyboard-visible:    false;
+    property <int>    confirm-delete-id:   0;    // > 0 → показать диалог подтверждения
+    property <string> confirm-delete-name: "";
 
     property <[string]> type-options: [
         "Датчик", "Пульт", "Движение", "Гараж", "Дым/Газ", "Другое"
@@ -296,10 +298,16 @@ export component RcDevicesScreen {
                             root.edit-id          = dev.id;
                             root.device-name      = dev.name;
                             root.device-type      = dev.device-type;
+                            root.code-hex         = dev.code-hex;
+                            root.protocol         = dev.protocol;
+                            root.bit-count        = dev.bit-count;
                             root.keyboard-visible = false;
                             root.show-form        = true;
                         }
-                        delete => { root.device-delete(dev.id); }
+                        delete => {
+                            root.confirm-delete-id   = dev.id;
+                            root.confirm-delete-name = dev.name;
+                        }
                     }
                 }
 
@@ -370,7 +378,7 @@ export component RcDevicesScreen {
             }
         }
 
-        // ══ PAGE 2 — Edit / Add form ══════════════════════════════════
+        // ══ PAGE 2 — Edit / Add form ══════════════════════════════════ ══════════════════════════════════
         Rectangle {
             x:          root.show-form ? 0px : parent.width;
             width:      parent.width;
@@ -564,8 +572,101 @@ export component RcDevicesScreen {
                         }
                         del-ta := TouchArea {
                             clicked => {
-                                root.show-form = false;
-                                root.device-delete(root.edit-id);
+                                root.confirm-delete-id   = root.edit-id;
+                                root.confirm-delete-name = root.device-name;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ══ Модальный диалог подтверждения удаления ════════════════════
+        if root.confirm-delete-id > 0: Rectangle {
+            background: #0d111799;  // полупрозрачный фон — перекрывает обе страницы
+
+            Rectangle {
+                width:         340px;
+                height:        160px;
+                x:             (parent.width  - self.width)  / 2;
+                y:             (parent.height - self.height) / 2;
+                background:    #161b22;
+                border-radius: 12px;
+                border-width:  1px;
+                border-color:  #da3633;
+
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 20px;
+                    alignment: center;
+
+                    Text {
+                        text:                 "Удалить устройство?";
+                        color:                #e6edf3;
+                        font-size:            16px;
+                        font-weight:          700;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text:                 root.confirm-delete-name != ""
+                                                  ? root.confirm-delete-name
+                                                  : "(без имени)";
+                        color:                #8b949e;
+                        font-size:            13px;
+                        horizontal-alignment: center;
+                        overflow:             elide;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height:             44px;
+                            background:         no-ta.has-hover ? #2d333b : #21262d;
+                            border-radius:      8px;
+                            border-width:       1px;
+                            border-color:       #30363d;
+                            animate background { duration: 100ms; }
+                            Text {
+                                text:                 "Отмена";
+                                color:                #8b949e;
+                                font-size:            14px;
+                                horizontal-alignment: center;
+                                vertical-alignment:   center;
+                            }
+                            no-ta := TouchArea {
+                                clicked => {
+                                    root.confirm-delete-id   = 0;
+                                    root.confirm-delete-name = "";
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height:             44px;
+                            background:         yes-ta.has-hover ? #5a1d1d : #3d1414;
+                            border-radius:      8px;
+                            border-width:       1px;
+                            border-color:       #da3633;
+                            animate background { duration: 100ms; }
+                            Text {
+                                text:                 "Удалить";
+                                color:                #f85149;
+                                font-size:            14px;
+                                font-weight:          700;
+                                horizontal-alignment: center;
+                                vertical-alignment:   center;
+                            }
+                            yes-ta := TouchArea {
+                                clicked => {
+                                    root.show-form           = false;
+                                    root.device-delete(root.confirm-delete-id);
+                                    root.confirm-delete-id   = 0;
+                                    root.confirm-delete-name = "";
+                                }
                             }
                         }
                     }

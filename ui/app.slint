@@ -29,6 +29,7 @@ export component AppWindow inherits Window {
     callback wifi-scan-requested();
     callback wifi-connect-requested(string, string);
     callback wifi-cancel-connect();
+    callback wifi-disconnect();
     callback wifi-password-delete-last();
 
     // ── RC Devices state ─────────────────────────────────────────
@@ -117,6 +118,7 @@ export component AppWindow inherits Window {
                 scan-requested               => { root.wifi-scan-requested(); }
                 connect-requested(ssid, pwd) => { root.wifi-connect-requested(ssid, pwd); }
                 cancel-connect               => { root.wifi-cancel-connect(); }
+                disconnect                   => { root.wifi-disconnect(); }
                 password-delete-last         => { root.wifi-password-delete-last(); }
             }
 
@@ -130,9 +132,9 @@ export component AppWindow inherits Window {
                 edit-id     <=> root.rc-edit-id;
                 device-name <=> root.rc-device-name;
                 device-type <=> root.rc-device-type;
-                code-hex:       root.rc-code-hex;
-                protocol:       root.rc-protocol;
-                bit-count:      root.rc-bit-count;
+                code-hex    <=> root.rc-code-hex;
+                protocol    <=> root.rc-protocol;
+                bit-count   <=> root.rc-bit-count;
                 scan-start                  => { root.rc-scan-start(); }
                 scan-cancel                 => { root.rc-scan-cancel(); }
                 device-save(id, name, t)    => { root.rc-device-save(id, name, t); }

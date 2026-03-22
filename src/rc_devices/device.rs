@@ -10,6 +10,7 @@ pub enum DeviceType {
 }
 
 impl DeviceType {
+    /// Строка для отображения в UI.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sensor    => "Датчик",
@@ -21,6 +22,35 @@ impl DeviceType {
         }
     }
 
+    /// Стабильный технический ключ для хранения в NVS.
+    /// Не зависит от языка интерфейса.
+    pub fn as_key(self) -> &'static str {
+        match self {
+            Self::Sensor    => "sensor",
+            Self::Remote    => "remote",
+            Self::Motion    => "motion",
+            Self::Garage    => "garage",
+            Self::SmokeFire => "smoke",
+            Self::Other     => "other",
+        }
+    }
+
+    /// Десериализация из NVS-ключа.
+    /// Обратно совместима со старыми данными, где хранились UI-строки.
+    pub fn from_key(s: &str) -> Self {
+        match s {
+            "sensor" => Self::Sensor,
+            "remote" => Self::Remote,
+            "motion" => Self::Motion,
+            "garage" => Self::Garage,
+            "smoke"  => Self::SmokeFire,
+            "other"  => Self::Other,
+            // Обратная совместимость: старые записи содержали UI-строки.
+            _        => Self::from_str(s),
+        }
+    }
+
+    /// Десериализация из UI-строки (используется в Slint-коллбэках).
     pub fn from_str(s: &str) -> Self {
         match s {
             "Пульт"    => Self::Remote,
@@ -74,7 +104,7 @@ impl RfDevice {
         protocol:    String,
         bit_count:   u8,
     ) -> Self {
-        debug_assert!(id > 0,          "device id must be positive");
+        debug_assert!(id > 0,               "device id must be positive");
         debug_assert!(!code_hex.is_empty(), "code_hex must not be empty");
         Self { id, name, device_type, code_hex, protocol, bit_count }
     }

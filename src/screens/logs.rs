@@ -40,7 +40,6 @@ impl LogScreenHandler {
 
         // Перестраиваем модель целиком (буфер небольшой — ≤ 256 строк).
         let items: Vec<SlintLogEntry> = buf.entries()
-            .iter()
             .map(|e| SlintLogEntry {
                 level:   e.level as i32,
                 message: e.message.as_str().into(),

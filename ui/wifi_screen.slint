@@ -176,6 +176,7 @@ export component WifiScreen {
     callback scan-requested();
     callback connect-requested(string, string);
     callback cancel-connect();
+    callback disconnect();
     callback password-delete-last();
 
     property <bool> keyboard-visible: false;
@@ -299,14 +300,36 @@ export component WifiScreen {
 
             HorizontalLayout {
                 padding-left:  20px;
-                padding-right: 20px;
+                padding-right: 12px;
+                spacing:       8px;
 
                 Text {
                     text:               root.status;
                     color:              (root.connecting || root.scanning) ? #58a6ff : #8b949e;
                     font-size:          13px;
                     vertical-alignment: center;
+                    horizontal-stretch: 1;
                     animate color { duration: 200ms; }
+                }
+
+                // Кнопка "Отключить" — видна только когда есть активное соединение
+                if root.is-connected: Rectangle {
+                    width:         110px;
+                    background:    disc-ta.has-hover ? #3d1414 : transparent;
+                    border-radius: 6px;
+                    border-width:  1px;
+                    border-color:  disc-ta.has-hover ? #da3633 : #3d444d;
+                    animate background   { duration: 100ms; }
+                    animate border-color { duration: 100ms; }
+
+                    Text {
+                        text:                 "Отключить";
+                        color:                #f85149;
+                        font-size:            12px;
+                        horizontal-alignment: center;
+                        vertical-alignment:   center;
+                    }
+                    disc-ta := TouchArea { clicked => { root.disconnect(); } }
                 }
             }
         }

@@ -2,6 +2,7 @@
 //! форматирует строки и помещает их в кольцевой буфер.
 //! Сообщения одновременно выводятся в UART через `eprintln!`.
 
+use std::collections::VecDeque;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use std::sync::{Arc, Mutex};
 
@@ -42,26 +43,27 @@ fn level_tag(l: Level) -> char {
 // ── Кольцевой буфер ──────────────────────────────────────────────────────────
 
 pub struct LogBuffer {
-    entries: Vec<LogEntry>,
+    entries: VecDeque<LogEntry>,
     /// Монотонно возрастающее число добавленных записей (включая вытесненные).
     total:   usize,
 }
 
 impl LogBuffer {
     fn new() -> Self {
-        Self { entries: Vec::with_capacity(RING_CAPACITY), total: 0 }
+        Self { entries: VecDeque::with_capacity(RING_CAPACITY), total: 0 }
     }
 
     fn push(&mut self, entry: LogEntry) {
         if self.entries.len() == RING_CAPACITY {
-            self.entries.remove(0);
+            self.entries.pop_front(); // O(1) вместо O(n)
         }
-        self.entries.push(entry);
+        self.entries.push_back(entry);
         self.total += 1;
     }
 
-    pub fn entries(&self) -> &[LogEntry] {
-        &self.entries
+    /// Итератор по всем хранимым записям (от старых к новым).
+    pub fn entries(&self) -> impl Iterator<Item = &LogEntry> + '_ {
+        self.entries.iter()
     }
 
     pub fn total(&self) -> usize {

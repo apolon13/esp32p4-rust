@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use slint::{ComponentHandle, Model};
+use slint::ComponentHandle;
 
 use crate::rc_devices::{DeviceStore, DeviceType, RfDevice};
 use crate::rf_receiver::{RfCode, RfReceiver};
@@ -137,7 +137,7 @@ impl RcDevicesScreenHandler {
             let mut st = store.borrow_mut();
 
             if id == 0 {
-                st.add(
+                let _ = st.add(
                     name.as_str(),
                     dtype,
                     app.get_rc_code_hex().as_str(),

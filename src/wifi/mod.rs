@@ -22,7 +22,9 @@ pub struct ScannedNetwork {
 pub enum WifiCmd {
     Scan,
     Connect { ssid: String, password: String },
-    Disconnect,
+    /// Отключиться от сети.  Если `forget_ssid` задан — стирает сохранённые
+    /// учётные данные для этой SSID, отключая автоподключение после перезагрузки.
+    Disconnect { forget_ssid: Option<String> },
 }
 
 pub enum WifiEvent {
@@ -71,12 +73,6 @@ impl WifiWorker {
             .expect("wifi worker thread spawn failed");
 
         Self { cmd_tx, event_rx, cancel_flag }
-    }
-
-    /// Send a command to the worker (non-blocking; drops the command if the
-    /// channel is full, which should never happen in normal operation).
-    pub fn send(&self, cmd: WifiCmd) {
-        let _ = self.cmd_tx.try_send(cmd);
     }
 
     /// Try to receive the next event from the worker without blocking.
@@ -205,9 +201,12 @@ fn worker_loop(
                 }
             }
 
-            WifiCmd::Disconnect => {
+            WifiCmd::Disconnect { forget_ssid } => {
                 is_connected = false;
                 let _ = wifi.disconnect();
+                if let Some(ssid) = forget_ssid {
+                    forget_credential(&nvs_creds, &ssid);
+                }
                 let _ = event_tx.send(WifiEvent::Disconnected);
             }
         }
@@ -367,5 +366,25 @@ fn save_credentials(nvs: &EspDefaultNvsPartition, ssid: &str, password: &str) {
             log::info!("WiFi credentials saved for '{ssid}' ({} total)", existing.len());
         }
         Err(e) => log::warn!("Failed to open NVS for credential storage: {e}"),
+    }
+}
+
+fn forget_credential(nvs: &EspDefaultNvsPartition, ssid: &str) {
+    let mut existing = load_all_credentials(nvs);
+    let before = existing.len();
+    existing.retain(|(s, _)| s != ssid);
+    if existing.len() == before {
+        return; // SSID не был сохранён
+    }
+    match EspNvs::new(nvs.clone(), "wifi_cred", true) {
+        Ok(h) => {
+            let _ = h.set_u8("count", existing.len() as u8);
+            for (i, (s, p)) in existing.iter().enumerate() {
+                let _ = h.set_str(&format!("s{i}"), s);
+                let _ = h.set_str(&format!("p{i}"), p);
+            }
+            log::info!("WiFi: забыта сеть '{ssid}' (осталось {})", existing.len());
+        }
+        Err(e) => log::warn!("Failed to open NVS to forget credential: {e}"),
     }
 }

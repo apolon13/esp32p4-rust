@@ -43,7 +43,7 @@ impl WifiScreenHandler {
             });
         }
 
-        // ── Cancel connect ────────────────────────────────────────
+        // ── Cancel connect (во время попытки подключения) ─────────
         {
             let cancel = worker.cancel_flag();
             let app_weak = app.as_weak();
@@ -51,6 +51,18 @@ impl WifiScreenHandler {
                 cancel.store(true, Ordering::Relaxed);
                 let app = app_weak.upgrade().unwrap();
                 app.set_wifi_status("Отмена...".into());
+            });
+        }
+
+        // ── Disconnect (ручное отключение) ────────────────────────
+        {
+            let tx = worker.cmd_sender();
+            let app_weak = app.as_weak();
+            app.on_wifi_disconnect(move || {
+                let app  = app_weak.upgrade().unwrap();
+                let ssid = app.get_wifi_connected_ssid().to_string();
+                app.set_wifi_status("Отключение...".into());
+                send_cmd(&tx, WifiCmd::Disconnect { forget_ssid: Some(ssid) });
             });
         }
 
@@ -130,7 +142,8 @@ impl WifiScreenHandler {
                 WifiEvent::Disconnected => {
                     app.set_wifi_is_connected(false);
                     app.set_wifi_connected_ip("".into());
-                    app.set_wifi_status("Соединение потеряно".into());
+                    app.set_wifi_connecting(false);
+                    app.set_wifi_status("Отключено".into());
                 }
             }
         }
