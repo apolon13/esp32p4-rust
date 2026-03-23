@@ -2,7 +2,19 @@ use slint::ComponentHandle;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::SyncSender;
 use crate::AppWindow;
-use crate::mqtt::{ControlCmd, MqttCmd, MqttConfig, MqttEvent, MqttTopics, MqttWorker};
+use crate::control::ControlCmd;
+use crate::mqtt::{MqttCmd, MqttConfig, MqttEvent, MqttTopics, MqttWorker};
+
+// ── Индексы полей формы (синхронизированы с Slint on_mqtt_field_set) ──────────
+const FIELD_HOST:          i32 = 1;
+const FIELD_PORT:          i32 = 2;
+const FIELD_USERNAME:      i32 = 3;
+const FIELD_PASSWORD:      i32 = 4;
+const FIELD_CLIENT_ID:     i32 = 5;
+const FIELD_TOPIC_ARM:     i32 = 6;
+const FIELD_TOPIC_DISARM:  i32 = 7;
+const FIELD_TOPIC_SILENT:  i32 = 8;
+const FIELD_TOPIC_ALARM:   i32 = 9;
 
 pub struct MqttScreenHandler {
     worker: MqttWorker,
@@ -69,7 +81,7 @@ impl MqttScreenHandler {
         app.on_mqtt_editing_delete_last(move || {
             let app = app_weak.upgrade().unwrap();
             let cur: String = app.get_mqtt_editing_text().into();
-            app.set_mqtt_editing_text(remove_last_char(&cur).into());
+            app.set_mqtt_editing_text(super::delete_last_char(&cur).into());
         });
     }
 }
@@ -109,8 +121,8 @@ fn default_config() -> MqttConfig {
 fn read_config(app: &AppWindow) -> MqttConfig {
     let port_str: String = app.get_mqtt_port().into();
     MqttConfig {
-        host:     app.get_mqtt_host().into(),
-        port:     port_str.parse::<u16>().unwrap_or(1883),
+        host:      app.get_mqtt_host().into(),
+        port:      port_str.parse::<u16>().unwrap_or(1883),
         username:  app.get_mqtt_username().into(),
         password:  app.get_mqtt_password().into(),
         client_id: app.get_mqtt_client_id().into(),
@@ -125,21 +137,17 @@ fn read_config(app: &AppWindow) -> MqttConfig {
 
 fn set_field(app: &AppWindow, field: i32, val: slint::SharedString) {
     match field {
-        1 => app.set_mqtt_host(val),
-        2 => app.set_mqtt_port(val),
-        3 => app.set_mqtt_username(val),
-        4 => app.set_mqtt_password(val),
-        5 => app.set_mqtt_client_id(val),
-        6 => app.set_mqtt_topic_arm(val),
-        7 => app.set_mqtt_topic_disarm(val),
-        8 => app.set_mqtt_topic_silent(val),
-        9 => app.set_mqtt_topic_alarm(val),
-        _ => {}
+        FIELD_HOST         => app.set_mqtt_host(val),
+        FIELD_PORT         => app.set_mqtt_port(val),
+        FIELD_USERNAME     => app.set_mqtt_username(val),
+        FIELD_PASSWORD     => app.set_mqtt_password(val),
+        FIELD_CLIENT_ID    => app.set_mqtt_client_id(val),
+        FIELD_TOPIC_ARM    => app.set_mqtt_topic_arm(val),
+        FIELD_TOPIC_DISARM => app.set_mqtt_topic_disarm(val),
+        FIELD_TOPIC_SILENT => app.set_mqtt_topic_silent(val),
+        FIELD_TOPIC_ALARM  => app.set_mqtt_topic_alarm(val),
+        _                  => {}
     }
-}
-
-fn remove_last_char(s: &str) -> String {
-    s.chars().take(s.chars().count().saturating_sub(1)).collect()
 }
 
 // ── Event handlers ────────────────────────────────────────────────────────────

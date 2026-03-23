@@ -78,10 +78,9 @@ impl WifiScreenHandler {
     fn register_password_delete_last(app: &AppWindow) {
         let app_weak = app.as_weak();
         app.on_wifi_password_delete_last(move || {
-            let app     = app_weak.upgrade().unwrap();
-            let cur:     String = app.get_wifi_password().into();
-            let trimmed: String = cur.chars().take(cur.chars().count().saturating_sub(1)).collect();
-            app.set_wifi_password(trimmed.into());
+            let app = app_weak.upgrade().unwrap();
+            let cur: String = app.get_wifi_password().into();
+            app.set_wifi_password(super::delete_last_char(&cur).into());
         });
     }
 }

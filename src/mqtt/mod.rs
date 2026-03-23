@@ -29,7 +29,7 @@ pub struct MqttConfig {
 
 pub enum MqttCmd { Connect(MqttConfig), Disconnect }
 
-pub use crate::control::ControlCmd;
+use crate::control::ControlCmd;
 
 pub enum MqttEvent {
     Connecting { attempt: u8, max: u8 },

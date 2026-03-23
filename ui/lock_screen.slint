@@ -27,6 +27,7 @@ component PinKey {
 
 export component LockScreen inherits Rectangle {
     in property <bool>   alarm:       false;
+    in property <bool>   ui-lock:     false;
     in property <bool>   has-pin:     false;
     in property <string> pin-display: "";
     in property <bool>   pin-error:   false;
@@ -45,7 +46,9 @@ export component LockScreen inherits Rectangle {
     Rectangle {
         x: 0; y: 0; width: parent.width; height: parent.height;
         border-width: 6px;
-        border-color: root.alarm ? #f85149 : #f0883e;
+        border-color: root.alarm   ? #f85149
+                    : root.ui-lock ? #58a6ff
+                    :                #f0883e;
         background: transparent;
         animate border-color { duration: 300ms; }
     }
@@ -58,15 +61,20 @@ export component LockScreen inherits Rectangle {
                 alignment: center; spacing: 16px; padding: 48px;
 
                 Text {
-                    text: root.alarm ? "ТРЕВОГА" : "ОХРАНА";
-                    color: root.alarm ? (root.pulse ? #ff8080 : #f85149) : #f0883e;
+                    text: root.alarm   ? "ТРЕВОГА"
+                        : root.ui-lock ? "ЗАБЛОКИРОВАНО"
+                        :                "ОХРАНА";
+                    color: root.alarm   ? (root.pulse ? #ff8080 : #f85149)
+                         : root.ui-lock ? #58a6ff
+                         :                #f0883e;
                     font-size: 64px; font-weight: 700;
                     horizontal-alignment: center;
                     animate color { duration: 300ms; }
                 }
                 Text {
-                    text: root.alarm ? "Зафиксировано нарушение"
-                                     : "Система поставлена на охрану";
+                    text: root.alarm   ? "Зафиксировано нарушение"
+                        : root.ui-lock ? "Доступ к интерфейсу заблокирован"
+                        :                "Система поставлена на охрану";
                     color: root.alarm ? #da3633 : #8b949e;
                     font-size: 18px; horizontal-alignment: center;
                 }

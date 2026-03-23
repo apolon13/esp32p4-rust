@@ -171,35 +171,15 @@ impl RcDevicesScreenHandler {
         app.on_rc_device_save(move |id, name, type_str| {
             let app   = app_weak.upgrade().unwrap();
             let dtype = DeviceType::from_str(type_str.as_str());
-            let new_remote = Self::apply_save(&app, &store, id, &name, dtype);
+            let new_remote = if id == 0 {
+                add_new_device(&app, &store, &name, dtype)
+            } else {
+                update_existing_device(&store, id as u32, &name, dtype);
+                None
+            };
             Self::sync_devices_to_ui(&app, &store.borrow());
             Self::start_binding_if_remote(&app, new_remote);
         });
-    }
-
-    /// Применяет сохранение: добавляет или обновляет устройство.
-    /// Возвращает `Some((id, name))` если добавлен новый Remote.
-    fn apply_save(
-        app:   &AppWindow,
-        store: &Rc<RefCell<DeviceStore>>,
-        id:    i32,
-        name:  &slint::SharedString,
-        dtype: DeviceType,
-    ) -> Option<(u32, String)> {
-        let mut st = store.borrow_mut();
-        if id == 0 {
-            st.add(name.as_str(), dtype,
-                   app.get_rc_code_hex().as_str(),
-                   app.get_rc_protocol().as_str(),
-                   app.get_rc_bit_count() as u8)
-                .filter(|_| dtype == DeviceType::Remote)
-                .map(|d| (d.id(), d.name().to_owned()))
-        } else {
-            if let Some(dev) = st.devices().iter().find(|d| d.id() == id as u32).cloned() {
-                st.update(dev.with_name(name.as_str()).with_type(dtype));
-            }
-            None
-        }
     }
 
     fn start_binding_if_remote(app: &AppWindow, new_remote: Option<(u32, String)>) {
@@ -255,29 +235,50 @@ impl RcDevicesScreenHandler {
     fn register_name_delete_last(app: &AppWindow) {
         let app_weak = app.as_weak();
         app.on_rc_device_name_delete_last(move || {
-            let app  = app_weak.upgrade().unwrap();
-            let cur  = app.get_rc_device_name().to_string();
-            let next = cur.chars().take(cur.chars().count().saturating_sub(1)).collect::<String>();
-            app.set_rc_device_name(next.into());
+            let app = app_weak.upgrade().unwrap();
+            let cur = app.get_rc_device_name().to_string();
+            app.set_rc_device_name(super::delete_last_char(&cur).into());
         });
+    }
+}
+
+// ── Мутации хранилища (вынесены из impl для читаемости) ──────────────────────
+
+/// Добавить новое устройство. Возвращает `Some((id, name))` если это Remote.
+fn add_new_device(
+    app:   &AppWindow,
+    store: &Rc<RefCell<DeviceStore>>,
+    name:  &slint::SharedString,
+    dtype: DeviceType,
+) -> Option<(u32, String)> {
+    store.borrow_mut()
+        .add(name.as_str(), dtype,
+             app.get_rc_code_hex().as_str(),
+             app.get_rc_protocol().as_str(),
+             app.get_rc_bit_count() as u8)
+        .filter(|_| dtype == DeviceType::Remote)
+        .map(|d| (d.id(), d.name().to_owned()))
+}
+
+fn update_existing_device(
+    store: &Rc<RefCell<DeviceStore>>,
+    id:    u32,
+    name:  &slint::SharedString,
+    dtype: DeviceType,
+) {
+    let mut st = store.borrow_mut();
+    if let Some(dev) = st.devices().iter().find(|d| d.id() == id).cloned() {
+        st.update(dev.with_name(name.as_str()).with_type(dtype));
     }
 }
 
 // ── RF code → ControlCmd ──────────────────────────────────────────────────────
 
 fn code_to_cmd(store: &DeviceStore, code: &str) -> Option<ControlCmd> {
-    for device in store.devices() {
-        if device.device_type() != DeviceType::Remote { continue; }
-        for idx in 0..4 {
-            if device.button(idx) == Some(code) {
-                return Some(match idx {
-                    0 => ControlCmd::Arm,
-                    1 => ControlCmd::Disarm,
-                    2 => ControlCmd::Silent,
-                    _ => ControlCmd::Alarm,
-                });
-            }
-        }
-    }
-    None
+    store.devices().iter()
+        .filter(|d| d.device_type() == DeviceType::Remote)
+        .find_map(|d| {
+            (0..4).find(|&i| d.button(i) == Some(code))
+                  .and_then(ControlCmd::from_button_idx)
+        })
 }
