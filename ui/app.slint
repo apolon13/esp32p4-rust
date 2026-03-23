@@ -2,6 +2,9 @@
 import { WifiScreen, NetworkInfo }           from "wifi_screen.slint";
 import { RcDevicesScreen, RcDeviceInfo }     from "rc_devices_screen.slint";
 import { LogScreen, LogEntry }               from "log_screen.slint";
+import { MqttScreen }                        from "mqtt_screen.slint";
+import { LockScreen }                        from "lock_screen.slint";
+import { SettingsScreen }                    from "settings_screen.slint";
 
 export { NetworkInfo }
 export { RcDeviceInfo }
@@ -69,6 +72,44 @@ export component AppWindow inherits Window {
     callback log-scroll-start();
     callback log-toggle-pin();
 
+    // ── MQTT state ───────────────────────────────────────────────
+    in-out property <string> mqtt-host: "";
+    in-out property <string> mqtt-port: "1883";
+    in-out property <string> mqtt-username: "";
+    in-out property <string> mqtt-password: "";
+    in-out property <string> mqtt-client-id: "";
+    in-out property <string> mqtt-topic-arm: "security/arm";
+    in-out property <string> mqtt-topic-disarm: "security/disarm";
+    in-out property <string> mqtt-topic-silent: "security/silent";
+    in-out property <string> mqtt-topic-alarm: "security/alarm";
+    in-out property <bool>   mqtt-connecting: false;
+    in-out property <bool>   mqtt-is-connected: false;
+    in-out property <string> mqtt-status: "Не подключено";
+    in-out property <string> mqtt-editing-text: "";
+
+    callback mqtt-connect-requested();
+    callback mqtt-cancel-connect();
+    callback mqtt-disconnect();
+    callback mqtt-field-set(int, string);
+    callback mqtt-editing-delete-last();
+
+    // ── Security state ───────────────────────────────────────────
+    in-out property <bool>   security-armed: false;
+    in-out property <bool>   security-alarm: false;
+    in-out property <string> lock-pin-display: "";
+    in-out property <bool>   lock-pin-error: false;
+
+    callback lock-pin-digit(string);
+    callback lock-pin-delete();
+    callback lock-pin-confirm();
+
+    // ── Settings state ───────────────────────────────────────────
+    in-out property <string> settings-pin: "";
+    in-out property <string> settings-editing-text: "";
+
+    callback settings-save-pin(string);
+    callback settings-editing-delete-last();
+
     HorizontalLayout {
         // ── Sidebar ──────────────────────────────────────────────
         Rectangle {
@@ -91,6 +132,8 @@ export component AppWindow inherits Window {
                     { label: "WiFi" },
                     { label: "RF"   },
                     { label: "Лог"  },
+                    { label: "MQTT" },
+                    { label: "Наст" },
                 ]: Rectangle {
                     height:        44px;
                     background:    root.current-screen == idx ? #1c2128 : transparent;
@@ -173,6 +216,54 @@ export component AppWindow inherits Window {
                 scroll-start => { root.log-scroll-start(); }
                 toggle-pin   => { root.log-toggle-pin(); }
             }
+
+            MqttScreen {
+                visible:       root.current-screen == 3;
+                width:         parent.width;
+                height:        parent.height;
+                wifi-connected: root.wifi-is-connected;
+                host          <=> root.mqtt-host;
+                port          <=> root.mqtt-port;
+                topic-arm     <=> root.mqtt-topic-arm;
+                topic-disarm  <=> root.mqtt-topic-disarm;
+                topic-silent  <=> root.mqtt-topic-silent;
+                topic-alarm   <=> root.mqtt-topic-alarm;
+                connecting    <=> root.mqtt-connecting;
+                is-connected  <=> root.mqtt-is-connected;
+                status        <=> root.mqtt-status;
+                username      <=> root.mqtt-username;
+                password      <=> root.mqtt-password;
+                client-id     <=> root.mqtt-client-id;
+                editing-text  <=> root.mqtt-editing-text;
+                connect-requested       => { root.mqtt-connect-requested(); }
+                cancel-connect          => { root.mqtt-cancel-connect(); }
+                disconnect              => { root.mqtt-disconnect(); }
+                field-set(f, v)         => { root.mqtt-field-set(f, v); }
+                editing-delete-last     => { root.mqtt-editing-delete-last(); }
+            }
+
+            SettingsScreen {
+                visible:              root.current-screen == 4;
+                width:                parent.width;
+                height:               parent.height;
+                pin               <=> root.settings-pin;
+                editing-text      <=> root.settings-editing-text;
+                save-pin(p)           => { root.settings-save-pin(p); }
+                editing-delete-last   => { root.settings-editing-delete-last(); }
+            }
         }
+    }
+
+    // ── Lock screen overlay (поверх всего) ───────────────────────
+    if root.security-armed || root.security-alarm: LockScreen {
+        x: 0; y: 0;
+        width: root.width; height: root.height;
+        alarm:       root.security-alarm;
+        has-pin:     root.settings-pin != "";
+        pin-display: root.lock-pin-display;
+        pin-error:   root.lock-pin-error;
+        pin-digit(d)  => { root.lock-pin-digit(d); }
+        pin-delete    => { root.lock-pin-delete(); }
+        pin-confirm   => { root.lock-pin-confirm(); }
     }
 }

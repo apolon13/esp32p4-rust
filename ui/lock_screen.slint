@@ -1,0 +1,156 @@
+// ── Lock / Alarm overlay ──────────────────────────────────────────────────────
+
+component PinKey {
+    in property <string> label;
+    in property <bool>   green: false;
+    in property <bool>   red:   false;
+    callback pressed();
+
+    height: 58px; horizontal-stretch: 1;
+    ta := TouchArea { clicked => { root.pressed(); } }
+    Rectangle {
+        background:
+            root.green ? (ta.has-hover ? #2ea043 : #238636) :
+            root.red   ? (ta.has-hover ? #5a1d1d : #3d1414) :
+                         (ta.has-hover ? #2d333b : #1c2128);
+        border-radius: 8px; border-width: 1px;
+        border-color: root.green ? #3fb950 : root.red ? #f85149 : #30363d;
+        animate background { duration: 80ms; }
+        Text {
+            text: root.label;
+            color: root.green ? #3fb950 : root.red ? #f85149 : #e6edf3;
+            font-size: 22px; font-weight: 700;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+}
+
+export component LockScreen inherits Rectangle {
+    in property <bool>   alarm:       false;
+    in property <bool>   has-pin:     false;
+    in property <string> pin-display: "";
+    in property <bool>   pin-error:   false;
+
+    callback pin-digit(string);
+    callback pin-delete();
+    callback pin-confirm();
+
+    property <bool> pulse: false;
+    Timer { interval: 500ms; running: root.alarm; triggered => { root.pulse = !root.pulse; } }
+
+    background: root.alarm ? (root.pulse ? #1a0000 : #0f0000) : #0d1117;
+    animate background { duration: 400ms; }
+
+    // Цветная рамка
+    Rectangle {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        border-width: 6px;
+        border-color: root.alarm ? #f85149 : #f0883e;
+        background: transparent;
+        animate border-color { duration: 300ms; }
+    }
+
+    HorizontalLayout {
+        // ── Левая панель: статус ───────────────────────────────────
+        Rectangle {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                alignment: center; spacing: 16px; padding: 48px;
+
+                Text {
+                    text: root.alarm ? "ТРЕВОГА" : "ОХРАНА";
+                    color: root.alarm ? (root.pulse ? #ff8080 : #f85149) : #f0883e;
+                    font-size: 64px; font-weight: 700;
+                    horizontal-alignment: center;
+                    animate color { duration: 300ms; }
+                }
+                Text {
+                    text: root.alarm ? "Зафиксировано нарушение"
+                                     : "Система поставлена на охрану";
+                    color: root.alarm ? #da3633 : #8b949e;
+                    font-size: 18px; horizontal-alignment: center;
+                }
+            }
+        }
+
+        // ── Правая панель: снятие ──────────────────────────────────
+        Rectangle {
+            horizontal-stretch: 1;
+
+            // Режим: нет PIN — одна большая кнопка
+            if !root.has-pin: VerticalLayout {
+                alignment: center; spacing: 16px; padding: 48px;
+                Text {
+                    text: "PIN-код не задан";
+                    color: #484f58; font-size: 14px; horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 64px;
+                    background: ul-ta.has-hover ? #2ea043 : #238636;
+                    border-radius: 12px;
+                    animate background { duration: 100ms; }
+                    Text {
+                        text: "РАЗБЛОКИРОВАТЬ";
+                        color: #ffffff; font-size: 18px; font-weight: 700;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    ul-ta := TouchArea { clicked => { root.pin-confirm(); } }
+                }
+            }
+
+            // Режим: есть PIN — цифровая клавиатура
+            if root.has-pin: VerticalLayout {
+                alignment: center; spacing: 10px; padding-left: 24px; padding-right: 24px;
+
+                // Индикатор введённого PIN
+                Rectangle {
+                    height: 58px;
+                    background: #161b22;
+                    border-radius: 8px; border-width: 1px;
+                    border-color: root.pin-error ? #da3633 : #30363d;
+                    animate border-color { duration: 200ms; }
+                    Text {
+                        text: root.pin-display == "" ? "Введите PIN" : root.pin-display;
+                        color: root.pin-error  ? #f85149
+                             : root.pin-display == "" ? #484f58
+                             : #e6edf3;
+                        font-size: root.pin-display == "" ? 16px : 30px;
+                        font-weight: 700;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        animate color    { duration: 200ms; }
+                        animate font-size { duration: 100ms; }
+                    }
+                }
+                if root.pin-error: Text {
+                    text: "Неверный PIN-код";
+                    color: #f85149; font-size: 13px; horizontal-alignment: center;
+                }
+
+                // Цифровая клавиатура
+                VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout { spacing: 6px;
+                        PinKey { label: "1"; pressed => { root.pin-digit("1"); } }
+                        PinKey { label: "2"; pressed => { root.pin-digit("2"); } }
+                        PinKey { label: "3"; pressed => { root.pin-digit("3"); } }
+                    }
+                    HorizontalLayout { spacing: 6px;
+                        PinKey { label: "4"; pressed => { root.pin-digit("4"); } }
+                        PinKey { label: "5"; pressed => { root.pin-digit("5"); } }
+                        PinKey { label: "6"; pressed => { root.pin-digit("6"); } }
+                    }
+                    HorizontalLayout { spacing: 6px;
+                        PinKey { label: "7"; pressed => { root.pin-digit("7"); } }
+                        PinKey { label: "8"; pressed => { root.pin-digit("8"); } }
+                        PinKey { label: "9"; pressed => { root.pin-digit("9"); } }
+                    }
+                    HorizontalLayout { spacing: 6px;
+                        PinKey { label: "DEL"; red:   true; pressed => { root.pin-delete();    } }
+                        PinKey { label: "0";               pressed => { root.pin-digit("0");   } }
+                        PinKey { label: "OK";  green: true; pressed => { root.pin-confirm();   } }
+                    }
+                }
+            }
+        }
+    }
+}

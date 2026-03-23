@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::mpsc::SyncSender;
 
 use slint::ComponentHandle;
 
+use crate::control::ControlCmd;
 use crate::rc_devices::{DeviceStore, DeviceType, RfDevice};
 use crate::rf_receiver::{RfCode, RfReceiver};
 use crate::{AppWindow, RcDeviceInfo};
@@ -63,21 +65,22 @@ pub struct RcDevicesScreenHandler {
     rf_receiver: RfReceiver,
     app:         slint::Weak<AppWindow>,
     store:       Rc<RefCell<DeviceStore>>,
+    cmd_tx:      SyncSender<ControlCmd>,
 }
 
 impl RcDevicesScreenHandler {
-    pub fn new(app: &AppWindow, rf_receiver: RfReceiver, store: DeviceStore) -> Self {
+    pub fn new(app: &AppWindow, rf_receiver: RfReceiver, store: DeviceStore, cmd_tx: SyncSender<ControlCmd>) -> Self {
         let store = Rc::new(RefCell::new(store));
         Self::sync_devices_to_ui(app, &store.borrow());
         Self::register_callbacks(app, &store);
-        Self { rf_receiver, app: app.as_weak(), store }
+        Self { rf_receiver, app: app.as_weak(), store, cmd_tx }
     }
 
     /// Дренирует входящие RF-коды и обновляет UI.  Не блокируется.
     pub fn poll(&self) {
         let Some(app) = self.app.upgrade() else { return };
         if self.poll_binding(&app) { return; }
-        self.poll_scan(&app);
+        if app.get_rc_scanning() { self.poll_scan(&app); } else { self.poll_runtime(); }
     }
 
     // ── Приватные методы ──────────────────────────────────────────
@@ -119,7 +122,6 @@ impl RcDevicesScreenHandler {
 
     fn poll_scan(&self, app: &AppWindow) {
         while let Some(rf) = self.rf_receiver.try_recv() {
-            if !app.get_rc_scanning() { continue; }
             let candidate = ScanCandidate::from_rf_code(&rf);
             let store = self.store.borrow();
             if store.contains_code(&candidate.code_hex) || store.contains_button_code(&candidate.code_hex) {
@@ -130,6 +132,16 @@ impl RcDevicesScreenHandler {
             log::info!("RF learn: новый код 0x{} [{}]", candidate.code_hex, candidate.protocol);
             candidate.populate_form(app);
             break;
+        }
+    }
+
+    fn poll_runtime(&self) {
+        while let Some(rf) = self.rf_receiver.try_recv() {
+            let code = format!("{:X}", rf.code);
+            if let Some(cmd) = code_to_cmd(&self.store.borrow(), &code) {
+                log::info!("RF: команда {:?} от кода {}", cmd, code);
+                let _ = self.cmd_tx.try_send(cmd);
+            }
         }
     }
 
@@ -249,4 +261,23 @@ impl RcDevicesScreenHandler {
             app.set_rc_device_name(next.into());
         });
     }
+}
+
+// ── RF code → ControlCmd ──────────────────────────────────────────────────────
+
+fn code_to_cmd(store: &DeviceStore, code: &str) -> Option<ControlCmd> {
+    for device in store.devices() {
+        if device.device_type() != DeviceType::Remote { continue; }
+        for idx in 0..4 {
+            if device.button(idx) == Some(code) {
+                return Some(match idx {
+                    0 => ControlCmd::Arm,
+                    1 => ControlCmd::Disarm,
+                    2 => ControlCmd::Silent,
+                    _ => ControlCmd::Alarm,
+                });
+            }
+        }
+    }
+    None
 }

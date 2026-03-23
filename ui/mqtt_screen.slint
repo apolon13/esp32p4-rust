@@ -1,0 +1,371 @@
+import { VirtualKeyboard } from "keyboard.slint";
+
+// ── Font coverage ─────────────────────────────────────────────────────────────
+component MqttFontCoverage {
+    width: 0; height: 0;
+    Text {
+        visible: false; font-size: 1px;
+        text: "абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ" +
+              "0123456789:.-_/@abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ●";
+    }
+}
+
+// ── Indeterminate progress bar ────────────────────────────────────────────────
+component MqttProgressBar {
+    in property <bool> running: false;
+    height: 3px;
+    property <bool> flip: false;
+    Timer { interval: 550ms; running: root.running; triggered => { root.flip = !root.flip; } }
+    Rectangle {
+        background: #21262d; clip: true;
+        bar := Rectangle {
+            height: 3px; width: 90px; background: #f0883e;
+            x: root.flip ? parent.width - 90px : 0px;
+            animate x { duration: 550ms; easing: ease-in-out; }
+        }
+    }
+}
+
+// ── Text input field row ──────────────────────────────────────────────────────
+// live-value: передаётся editing-text когда поле активно, иначе ""
+component MqttField {
+    in property <string> label;
+    in property <string> placeholder: "";
+    in property <string> value:       "";
+    in property <string> live-value:  "";  // editing-text, пока активно
+    in property <bool>   active:      false;
+    in property <bool>   secret:      false;
+    callback tapped();
+
+    height: 44px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: root.label; color: #8b949e; font-size: 13px;
+            vertical-alignment: center; width: 80px;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            background: #0d1117; border-radius: 6px; border-width: 1px;
+            border-color: root.active ? #f0883e : #30363d;
+            animate border-color { duration: 100ms; }
+
+            property <string> shown: root.active ? root.live-value : root.value;
+            Text {
+                x: 10px;
+                text:  shown == "" ? root.placeholder
+                     : root.secret && !root.active ? "••••••••"
+                     : shown;
+                color: shown == "" ? #484f58 : #e6edf3;
+                font-size: 14px; vertical-alignment: center; overflow: elide;
+            }
+            TouchArea { clicked => { root.tapped(); } }
+        }
+    }
+}
+
+// ── MQTT screen ───────────────────────────────────────────────────────────────
+export component MqttScreen {
+    in-out property <bool>   wifi-connected;
+    in-out property <string> host;
+    in-out property <string> port:       "1883";
+    in-out property <string> username:   "";
+    in-out property <string> password:   "";
+    in-out property <string> client-id:  "";
+    in-out property <string> topic-arm:   "security/arm";
+    in-out property <string> topic-disarm:"security/disarm";
+    in-out property <string> topic-silent:"security/silent";
+    in-out property <string> topic-alarm: "security/alarm";
+    in-out property <bool>   connecting;
+    in-out property <bool>   is-connected;
+    in-out property <string> status: "Не подключено";
+    in-out property <string> editing-text;
+
+    callback connect-requested();
+    callback cancel-connect();
+    callback disconnect();
+    callback field-set(int, string);
+    callback editing-delete-last();
+
+    // 0=none 1=host 2=port 3=user 4=pass 5=cid 6=arm 7=disarm 8=silent 9=alarm
+    property <int> active-field: 0;
+
+    MqttFontCoverage {}
+
+    // ── Header ───────────────────────────────────────────────────────────────
+    Rectangle {
+        y: 0; height: 56px; background: #161b22;
+        HorizontalLayout {
+            padding-left: 20px; padding-right: 20px; spacing: 12px;
+            Text {
+                text: "MQTT"; color: #e6edf3; font-size: 20px; font-weight: 700;
+                vertical-alignment: center; horizontal-stretch: 1;
+            }
+            if root.is-connected: Rectangle {
+                width: 220px; background: #1a1a0a; border-radius: 6px;
+                border-width: 1px; border-color: #f0883e;
+                Text {
+                    text: "● " + root.host + ":" + root.port;
+                    color: #f0883e; font-size: 12px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+
+    // ── Progress bar ─────────────────────────────────────────────────────────
+    if root.connecting: MqttProgressBar {
+        y: 56px; width: parent.width; running: true;
+    }
+
+    // ── Status bar ───────────────────────────────────────────────────────────
+    Rectangle {
+        y: parent.height - 40px; height: 40px; background: #161b22;
+        HorizontalLayout {
+            padding-left: 20px; padding-right: 12px; spacing: 8px;
+            Text {
+                text: !root.wifi-connected ? "Нет подключения Wi-Fi" : root.status;
+                color: !root.wifi-connected ? #3d444d
+                     : root.connecting      ? #f0883e
+                     : root.is-connected    ? #3fb950
+                     :                        #8b949e;
+                font-size: 13px; vertical-alignment: center; horizontal-stretch: 1;
+                animate color { duration: 200ms; }
+            }
+            if root.is-connected: Rectangle {
+                width: 110px; border-radius: 6px; border-width: 1px;
+                background:   disc-ta.has-hover ? #3d1414 : transparent;
+                border-color: disc-ta.has-hover ? #da3633 : #3d444d;
+                animate background   { duration: 100ms; }
+                animate border-color { duration: 100ms; }
+                Text {
+                    text: "Отключить"; color: #f85149; font-size: 12px;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+                disc-ta := TouchArea { clicked => { root.disconnect(); } }
+            }
+        }
+    }
+
+    // ── Content area (between header and footer) ──────────────────────────────
+    content := Rectangle {
+        y: 56px;
+        height: parent.height - 56px - 40px;
+        clip: true;
+
+        // ── No-WiFi placeholder ───────────────────────────────────────────────
+        if !root.wifi-connected: VerticalLayout {
+            alignment: center; spacing: 12px;
+            Text { text: "Нет подключения Wi-Fi"; color: #484f58; font-size: 18px; horizontal-alignment: center; }
+            Text { text: "Подключитесь к сети Wi-Fi,"; color: #3d444d; font-size: 14px; horizontal-alignment: center; }
+            Text { text: "чтобы использовать MQTT.";   color: #3d444d; font-size: 14px; horizontal-alignment: center; }
+        }
+
+        // ── Scrollable form ───────────────────────────────────────────────────
+        // Напрямую в content, чтобы parent.height был правильным
+        if root.wifi-connected: Flickable {
+            y: 0; width: parent.width;
+            // Уменьшаем высоту когда клавиатура открыта
+            height: root.active-field > 0 ? content.height - 258px : content.height;
+            interactive: true;
+            viewport-width: self.width;
+            viewport-height: 580px;
+
+            VerticalLayout {
+                padding: 16px; spacing: 8px; alignment: start;
+
+                // ── Брокер ───────────────────────────────────────────────────
+                Text { text: "БРОКЕР"; color: #484f58; font-size: 11px; letter-spacing: 0.8px; }
+
+                // Host + port на одной строке
+                HorizontalLayout {
+                    spacing: 8px; height: 44px;
+
+                    // Host
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Адрес"; color: #8b949e; font-size: 13px; vertical-alignment: center; width: 56px; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                background: #0d1117; border-radius: 6px; border-width: 1px;
+                                border-color: root.active-field == 1 ? #f0883e : #30363d;
+                                animate border-color { duration: 100ms; }
+                                property <string> shown: root.active-field == 1 ? root.editing-text : root.host;
+                                Text {
+                                    x: 10px;
+                                    text:  shown == "" ? "IP или имя хоста" : shown;
+                                    color: shown == "" ? #484f58 : #e6edf3;
+                                    font-size: 14px; vertical-alignment: center; overflow: elide;
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        root.field-set(root.active-field, root.editing-text);
+                                        root.editing-text = root.host;
+                                        root.active-field = 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Port
+                    Rectangle {
+                        width: 140px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Порт"; color: #8b949e; font-size: 13px; vertical-alignment: center; width: 40px; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                background: #0d1117; border-radius: 6px; border-width: 1px;
+                                border-color: root.active-field == 2 ? #f0883e : #30363d;
+                                animate border-color { duration: 100ms; }
+                                property <string> shown: root.active-field == 2 ? root.editing-text : root.port;
+                                Text {
+                                    x: 10px;
+                                    text:  shown == "" ? "1883" : shown;
+                                    color: shown == "" ? #484f58 : #e6edf3;
+                                    font-size: 14px; vertical-alignment: center;
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        root.field-set(root.active-field, root.editing-text);
+                                        root.editing-text = root.port;
+                                        root.active-field = 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Аутентификация
+                MqttField {
+                    label: "Логин"; value: root.username; placeholder: "(необязательно)";
+                    live-value: root.active-field == 3 ? root.editing-text : "";
+                    active: root.active-field == 3;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.username; root.active-field = 3;
+                    }
+                }
+                MqttField {
+                    label: "Пароль"; value: root.password; placeholder: "(необязательно)"; secret: true;
+                    live-value: root.active-field == 4 ? root.editing-text : "";
+                    active: root.active-field == 4;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.password; root.active-field = 4;
+                    }
+                }
+                MqttField {
+                    label: "Client ID"; value: root.client-id; placeholder: "(авто)";
+                    live-value: root.active-field == 5 ? root.editing-text : "";
+                    active: root.active-field == 5;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.client-id; root.active-field = 5;
+                    }
+                }
+
+                // ── Топики ───────────────────────────────────────────────────
+                Rectangle { height: 4px; }
+                Text { text: "ТОПИКИ УПРАВЛЕНИЯ"; color: #484f58; font-size: 11px; letter-spacing: 0.8px; }
+
+                MqttField {
+                    label: "Охрана"; value: root.topic-arm; placeholder: "security/arm";
+                    live-value: root.active-field == 6 ? root.editing-text : "";
+                    active: root.active-field == 6;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.topic-arm; root.active-field = 6;
+                    }
+                }
+                MqttField {
+                    label: "Снять"; value: root.topic-disarm; placeholder: "security/disarm";
+                    live-value: root.active-field == 7 ? root.editing-text : "";
+                    active: root.active-field == 7;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.topic-disarm; root.active-field = 7;
+                    }
+                }
+                MqttField {
+                    label: "Без звука"; value: root.topic-silent; placeholder: "security/silent";
+                    live-value: root.active-field == 8 ? root.editing-text : "";
+                    active: root.active-field == 8;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.topic-silent; root.active-field = 8;
+                    }
+                }
+                MqttField {
+                    label: "Тревога"; value: root.topic-alarm; placeholder: "security/alarm";
+                    live-value: root.active-field == 9 ? root.editing-text : "";
+                    active: root.active-field == 9;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.topic-alarm; root.active-field = 9;
+                    }
+                }
+
+                // ── Кнопка ───────────────────────────────────────────────────
+                Rectangle { height: 8px; }
+
+                if !root.connecting && !root.is-connected: Rectangle {
+                    height: 48px; background: conn-ta.has-hover ? #bf6a15 : #a0521a;
+                    border-radius: 10px;
+                    animate background { duration: 100ms; }
+                    Text {
+                        text: "Подключиться"; color: #ffffff;
+                        font-size: 16px; font-weight: 700;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    conn-ta := TouchArea {
+                        clicked => {
+                            root.field-set(root.active-field, root.editing-text);
+                            root.active-field = 0;
+                            root.connect-requested();
+                        }
+                    }
+                }
+
+                if root.connecting: Rectangle {
+                    height: 48px; background: cancel-ta.has-hover ? #5a1d1d : #3d1414;
+                    border-radius: 10px; border-width: 1px; border-color: #da3633;
+                    animate background { duration: 100ms; }
+                    Text {
+                        text: "Отменить подключение"; color: #f85149;
+                        font-size: 16px; font-weight: 700;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                    cancel-ta := TouchArea { clicked => { root.cancel-connect(); } }
+                }
+
+                if root.is-connected: Rectangle {
+                    height: 48px; background: #0d2818;
+                    border-radius: 10px; border-width: 1px; border-color: #238636;
+                    Text {
+                        text: "● Подключено к " + root.host + ":" + root.port;
+                        color: #3fb950; font-size: 15px;
+                        horizontal-alignment: center; vertical-alignment: center; overflow: elide;
+                    }
+                }
+            }
+        }
+
+        // ── Клавиатура — позиционируется ПРЯМО в content, parent.height = 504px ──
+        if root.active-field > 0 && root.wifi-connected: VirtualKeyboard {
+            y: content.height - 258px;
+            width: content.width;
+            value <=> root.editing-text;
+            done => {
+                root.field-set(root.active-field, root.editing-text);
+                root.active-field = 0;
+            }
+            delete-last => { root.editing-delete-last(); }
+        }
+    }
+}

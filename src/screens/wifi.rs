@@ -6,24 +6,34 @@ use crate::{AppWindow, NetworkInfo};
 use crate::wifi::{ScannedNetwork, WifiCmd, WifiEvent, WifiWorker};
 
 pub struct WifiScreenHandler {
-    worker: WifiWorker,
-    app:    slint::Weak<AppWindow>,
+    worker:       WifiWorker,
+    app:          slint::Weak<AppWindow>,
+    wifi_notify:  Option<SyncSender<bool>>,
 }
 
 impl WifiScreenHandler {
-    pub fn new(app: &AppWindow, worker: WifiWorker) -> Self {
+    pub fn new(app: &AppWindow, worker: WifiWorker, wifi_notify: Option<SyncSender<bool>>) -> Self {
         Self::register_scan(app, worker.cmd_sender());
         Self::register_connect(app, worker.cmd_sender());
         Self::register_cancel(app, worker.cancel_flag());
         Self::register_disconnect(app, worker.cmd_sender());
         Self::register_password_delete_last(app);
-        Self { worker, app: app.as_weak() }
+        Self { worker, app: app.as_weak(), wifi_notify }
     }
 
     pub fn poll(&self) {
         let Some(app) = self.app.upgrade() else { return };
         while let Some(event) = self.worker.try_recv() {
+            let notify = match &event {
+                WifiEvent::Connected { .. } => Some(true),
+                WifiEvent::Disconnected     => Some(false),
+                WifiEvent::ConnectError(_)  => Some(false),
+                _                          => None,
+            };
             handle_event(&app, event);
+            if let (Some(state), Some(tx)) = (notify, &self.wifi_notify) {
+                let _ = tx.try_send(state);
+            }
         }
     }
 
