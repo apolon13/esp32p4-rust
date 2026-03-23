@@ -62,18 +62,18 @@ export component LockScreen inherits Rectangle {
 
                 Text {
                     text: root.alarm   ? "ТРЕВОГА"
-                        : root.ui-lock ? "ЗАБЛОКИРОВАНО"
+                        : root.ui-lock ? "БЛОКИРОВКА"
                         :                "ОХРАНА";
                     color: root.alarm   ? (root.pulse ? #ff8080 : #f85149)
                          : root.ui-lock ? #58a6ff
                          :                #f0883e;
-                    font-size: 64px; font-weight: 700;
+                    font-size: root.ui-lock ? 48px : 64px; font-weight: 700;
                     horizontal-alignment: center;
                     animate color { duration: 300ms; }
                 }
                 Text {
                     text: root.alarm   ? "Зафиксировано нарушение"
-                        : root.ui-lock ? "Доступ к интерфейсу заблокирован"
+                        : root.ui-lock ? "Доступ заблокирован"
                         :                "Система поставлена на охрану";
                     color: root.alarm ? #da3633 : #8b949e;
                     font-size: 18px; horizontal-alignment: center;

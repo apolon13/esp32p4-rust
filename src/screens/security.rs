@@ -105,6 +105,7 @@ fn do_arm(app: &AppWindow) {
 fn disarm(app: &AppWindow) {
     app.set_security_armed(false);
     app.set_security_alarm(false);
+    app.set_ui_locked(false);
     app.set_lock_pin_error(false);
 }
 
