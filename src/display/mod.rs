@@ -17,6 +17,10 @@ impl Display {
         unsafe { ffi::display_backlight_on() };
     }
 
+    pub fn backlight_off(&self) {
+        unsafe { ffi::display_backlight_off() };
+    }
+
     pub fn render<F>(&self, f: F)
     where
         F: FnOnce(&mut [slint::platform::software_renderer::Rgb565Pixel], usize),

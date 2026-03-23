@@ -10,6 +10,37 @@ export { NetworkInfo }
 export { RcDeviceInfo }
 export { LogEntry }
 
+// ── Lock icon (shackle + body drawn with rectangles) ──────────────────────────
+component LockIcon {
+    in property <color> icon-color: #ffffff;
+    width: 18px; height: 22px;
+
+    // Дужка: верхний полукруг через clip
+    Rectangle {
+        x: 2px; y: 0;
+        width: 14px; height: 7px;
+        clip: true;
+        Rectangle {
+            width: 14px; height: 14px;
+            background: transparent;
+            border-radius: 7px;
+            border-width: 2.5px;
+            border-color: root.icon-color;
+        }
+    }
+    // Левая стойка дужки
+    Rectangle { x: 2px;    y: 5px; width: 2.5px; height: 7px; background: root.icon-color; }
+    // Правая стойка дужки
+    Rectangle { x: 13.5px; y: 5px; width: 2.5px; height: 7px; background: root.icon-color; }
+    // Корпус замка
+    Rectangle {
+        x: 0; y: 10px;
+        width: 18px; height: 12px;
+        background: root.icon-color;
+        border-radius: 2px;
+    }
+}
+
 export component AppWindow inherits Window {
     width:      1024px;
     height:      600px;
@@ -98,17 +129,21 @@ export component AppWindow inherits Window {
     in-out property <bool>   security-alarm: false;
     in-out property <string> lock-pin-display: "";
     in-out property <bool>   lock-pin-error: false;
+    in-out property <string> arm-countdown-text: "";
 
     callback lock-pin-digit(string);
     callback lock-pin-delete();
     callback lock-pin-confirm();
+    callback arm-now();
 
     // ── Settings state ───────────────────────────────────────────
     in-out property <string> settings-pin: "";
     in-out property <string> settings-editing-text: "";
+    in-out property <int>    settings-arm-timeout: 3;
 
     callback settings-save-pin(string);
     callback settings-editing-delete-last();
+    callback settings-save-timeout(int);
 
     HorizontalLayout {
         // ── Sidebar ──────────────────────────────────────────────
@@ -148,6 +183,25 @@ export component AppWindow inherits Window {
                     }
                     TouchArea { clicked => { root.current-screen = idx; } }
                 }
+            }
+
+            // ── ARM кнопка (снизу) ───────────────────────────────
+            if !root.security-armed && !root.security-alarm: Rectangle {
+                y: parent.height - 56px;
+                height: 46px;
+                x: 5px; width: parent.width - 10px;
+                background: arm-ta.has-hover ? #2ea043 : #238636;
+                border-radius: 8px;
+                animate background { duration: 100ms; }
+                Text {
+                    text: "LOCK";
+                    color: #ffffff;
+                    font-size: 11px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                arm-ta := TouchArea { clicked => { root.arm-now(); } }
             }
         }
 
@@ -248,7 +302,9 @@ export component AppWindow inherits Window {
                 height:               parent.height;
                 pin               <=> root.settings-pin;
                 editing-text      <=> root.settings-editing-text;
+                arm-timeout       <=> root.settings-arm-timeout;
                 save-pin(p)           => { root.settings-save-pin(p); }
+                save-timeout(v)       => { root.settings-save-timeout(v); }
                 editing-delete-last   => { root.settings-editing-delete-last(); }
             }
         }

@@ -92,10 +92,11 @@ fn run_loop(
     security:    &screens::security::SecurityHandler,
 ) {
     loop {
-        poll_all(touch, window, wifi_screen, rc_screen, log_screen, mqtt_screen, security);
+        poll_all(touch, window, display, wifi_screen, rc_screen, log_screen, mqtt_screen, security);
         if !try_render(display, window) {
             while !display.try_vsync_timeout(4) {
-                touch.poll(window);
+                let t = touch.poll(window);
+                if t { security.poll(display, true); }
                 slint::platform::update_timers_and_animations();
             }
         }
@@ -106,19 +107,21 @@ fn run_loop(
 fn poll_all(
     touch:       &mut touch::TouchController,
     window:      &Rc<MinimalSoftwareWindow>,
+    display:     &display::Display,
     wifi_screen: &screens::wifi::WifiScreenHandler,
     rc_screen:   &screens::rc_devices::RcDevicesScreenHandler,
     log_screen:  &screens::logs::LogScreenHandler,
     mqtt_screen: &screens::mqtt::MqttScreenHandler,
     security:    &screens::security::SecurityHandler,
-) {
-    touch.poll(window);
+) -> bool {
+    let touched = touch.poll(window);
     slint::platform::update_timers_and_animations();
     wifi_screen.poll();
     rc_screen.poll();
     log_screen.poll();
     mqtt_screen.poll();
-    security.poll();
+    security.poll(display, touched);
+    touched
 }
 
 fn try_render(display: &display::Display, window: &Rc<MinimalSoftwareWindow>) -> bool {

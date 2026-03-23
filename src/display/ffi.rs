@@ -13,5 +13,6 @@ extern "C" {
     /// Returns true if vsync occurred, false if timeout expired.
     pub fn display_wait_vsync_timeout(timeout_ms: u32) -> bool;
     pub fn display_backlight_on();
+    pub fn display_backlight_off();
     pub fn esp_cache_msync(addr: *mut core::ffi::c_void, size: usize, flags: i32) -> i32;
 }

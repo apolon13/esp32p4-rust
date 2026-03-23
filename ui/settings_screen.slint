@@ -4,8 +4,10 @@ import { VirtualKeyboard } from "keyboard.slint";
 export component SettingsScreen {
     in-out property <string> pin;
     in-out property <string> editing-text;
+    in-out property <int>    arm-timeout: 3;
 
     callback save-pin(string);
+    callback save-timeout(int);
     callback editing-delete-last();
 
     property <bool> pin-active: false;
@@ -33,11 +35,55 @@ export component SettingsScreen {
             height: root.pin-active ? content.height - 258px : content.height;
             interactive: true;
             viewport-width: self.width;
-            viewport-height: 300px;
+            viewport-height: 450px;
 
             VerticalLayout {
                 padding: 16px; spacing: 8px; alignment: start;
 
+                Rectangle { height: 8px; }
+                Text { text: "АВТОПОСТАНОВКА"; color: #484f58; font-size: 11px; letter-spacing: 0.8px; }
+
+                // Таймаут авто-постановки
+                HorizontalLayout {
+                    height: 44px; spacing: 8px;
+                    Text {
+                        text: "Таймаут"; color: #8b949e; font-size: 13px;
+                        vertical-alignment: center; width: 100px;
+                    }
+                    Rectangle {
+                        width: 44px; border-radius: 6px; border-width: 1px; border-color: #30363d;
+                        background: minus-ta.has-hover ? #2d333b : #21262d;
+                        animate background { duration: 80ms; }
+                        Text { text: "-"; color: #e6edf3; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                        minus-ta := TouchArea {
+                            clicked => { root.save-timeout(root.arm-timeout > 1 ? root.arm-timeout - 1 : 1); }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: #0d1117; border-radius: 6px; border-width: 1px; border-color: #30363d;
+                        Text {
+                            text: root.arm-timeout + " мин";
+                            color: #e6edf3; font-size: 14px;
+                            horizontal-alignment: center; vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        width: 44px; border-radius: 6px; border-width: 1px; border-color: #30363d;
+                        background: plus-ta.has-hover ? #2d333b : #21262d;
+                        animate background { duration: 80ms; }
+                        Text { text: "+"; color: #e6edf3; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                        plus-ta := TouchArea {
+                            clicked => { root.save-timeout(root.arm-timeout < 60 ? root.arm-timeout + 1 : 60); }
+                        }
+                    }
+                }
+                Text {
+                    text: "Время до автоматической постановки на охрану";
+                    color: #3d444d; font-size: 12px;
+                }
+
+                Rectangle { height: 8px; }
                 Text { text: "БЕЗОПАСНОСТЬ"; color: #484f58; font-size: 11px; letter-spacing: 0.8px; }
 
                 // PIN поле
@@ -63,20 +109,11 @@ export component SettingsScreen {
                             font-size: 14px; vertical-alignment: center; overflow: elide;
                         }
                         TouchArea {
-                            clicked => {
-                                root.editing-text = "";
-                                root.pin-active = true;
-                            }
+                            clicked => { root.editing-text = ""; root.pin-active = true; }
                         }
                     }
                 }
-
-                Text {
-                    text: "Только цифры, от 4 до 8 знаков";
-                    color: #3d444d; font-size: 12px;
-                }
-
-                Rectangle { height: 4px; }
+                Text { text: "Только цифры, до 8 знаков"; color: #3d444d; font-size: 12px; }
 
                 // Кнопка очистить PIN
                 if root.pin != "" && !root.pin-active: Rectangle {

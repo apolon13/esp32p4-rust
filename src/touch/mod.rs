@@ -31,11 +31,13 @@ impl TouchController {
     }
 
     /// Poll the touch panel and dispatch Slint pointer events to `window`.
-    pub fn poll(&mut self, window: &slint::platform::software_renderer::MinimalSoftwareWindow) {
+    /// Returns `true` if a new touch press was detected this frame.
+    pub fn poll(&mut self, window: &slint::platform::software_renderer::MinimalSoftwareWindow) -> bool {
         let mut x: u16 = 0;
         let mut y: u16 = 0;
         let is_pressed = unsafe { touch_read(&mut x, &mut y) };
 
+        let mut new_press = false;
         if is_pressed {
             let pos = LogicalPosition::new(x as f32, y as f32);
 
@@ -45,6 +47,7 @@ impl TouchController {
                 self.is_drag   = false;
                 self.press_pos = pos;
                 self.last_pos  = pos;
+                new_press      = true;
                 window.dispatch_event(WindowEvent::PointerPressed {
                     position: pos,
                     button:   PointerEventButton::Left,
@@ -83,5 +86,6 @@ impl TouchController {
             self.pressed = false;
             self.is_drag = false;
         }
+        new_press
     }
 }
