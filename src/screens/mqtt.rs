@@ -15,6 +15,7 @@ const FIELD_TOPIC_ARM:     i32 = 6;
 const FIELD_TOPIC_DISARM:  i32 = 7;
 const FIELD_TOPIC_SILENT:  i32 = 8;
 const FIELD_TOPIC_ALARM:   i32 = 9;
+const FIELD_TOPIC_EVENTS:  i32 = 10;
 
 pub struct MqttScreenHandler {
     worker: MqttWorker,
@@ -99,6 +100,7 @@ fn prefill_form(app: &AppWindow, worker: &MqttWorker) {
     app.set_mqtt_topic_disarm(cfg.topics.disarm.into());
     app.set_mqtt_topic_silent(cfg.topics.silent.into());
     app.set_mqtt_topic_alarm(cfg.topics.alarm.into());
+    app.set_mqtt_topic_events(cfg.topics.events.into());
     app.set_mqtt_status("Не подключено".into());
 }
 
@@ -114,6 +116,7 @@ fn default_config() -> MqttConfig {
             disarm: "security/disarm".to_owned(),
             silent: "security/silent".to_owned(),
             alarm:  "security/alarm".to_owned(),
+            events: "security/events".to_owned(),
         },
     }
 }
@@ -131,6 +134,7 @@ fn read_config(app: &AppWindow) -> MqttConfig {
             disarm: app.get_mqtt_topic_disarm().into(),
             silent: app.get_mqtt_topic_silent().into(),
             alarm:  app.get_mqtt_topic_alarm().into(),
+            events: app.get_mqtt_topic_events().into(),
         },
     }
 }
@@ -146,6 +150,7 @@ fn set_field(app: &AppWindow, field: i32, val: slint::SharedString) {
         FIELD_TOPIC_DISARM => app.set_mqtt_topic_disarm(val),
         FIELD_TOPIC_SILENT => app.set_mqtt_topic_silent(val),
         FIELD_TOPIC_ALARM  => app.set_mqtt_topic_alarm(val),
+        FIELD_TOPIC_EVENTS => app.set_mqtt_topic_events(val),
         _                  => {}
     }
 }

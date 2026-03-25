@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use slint::ComponentHandle;
 use crate::control::ControlCmd;
 use crate::display::Display;
+use crate::mqtt::EventPublisher;
 use crate::AppWindow;
 
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -14,20 +15,21 @@ pub struct SecurityHandler {
     app:           slint::Weak<AppWindow>,
     last_activity: Rc<Cell<Instant>>,
     backlight_on:  Rc<Cell<bool>>,
+    event_pub:     EventPublisher,
 }
 
 impl SecurityHandler {
-    pub fn new(app: &AppWindow, cmd_rx: Receiver<ControlCmd>) -> Self {
+    pub fn new(app: &AppWindow, cmd_rx: Receiver<ControlCmd>, event_pub: EventPublisher) -> Self {
         let entered       = Rc::new(RefCell::new(String::new()));
         let last_activity = Rc::new(Cell::new(Instant::now()));
         let backlight_on  = Rc::new(Cell::new(true));
         register_pin_digit(app, &entered);
         register_pin_delete(app, &entered);
         register_pin_confirm(app, &entered);
-        register_arm_now(app);
+        register_arm_now(app, event_pub.clone());
         register_lock_screen(app);
         app.set_security_armed(true);
-        Self { cmd_rx, app: app.as_weak(), last_activity, backlight_on }
+        Self { cmd_rx, app: app.as_weak(), last_activity, backlight_on, event_pub }
     }
 
     pub fn poll(&self, display: &Display, touched: bool) {
@@ -40,7 +42,12 @@ impl SecurityHandler {
             }
         }
         while let Ok(cmd) = self.cmd_rx.try_recv() {
-            apply_cmd(&app, cmd);
+            if !self.backlight_on.get() {
+                display.backlight_on();
+                self.backlight_on.set(true);
+            }
+            self.last_activity.set(Instant::now());
+            apply_cmd(&app, cmd, &self.event_pub);
         }
         tick_inactivity(display, &app, &self.last_activity, &self.backlight_on);
     }
@@ -85,9 +92,12 @@ fn register_pin_confirm(app: &AppWindow, entered: &Rc<RefCell<String>>) {
     });
 }
 
-fn register_arm_now(app: &AppWindow) {
+fn register_arm_now(app: &AppWindow, event_pub: EventPublisher) {
     let app_weak = app.as_weak();
-    app.on_arm_now(move || { do_arm(&app_weak.upgrade().unwrap()); });
+    app.on_arm_now(move || {
+        do_arm(&app_weak.upgrade().unwrap());
+        event_pub.publish("armed");
+    });
 }
 
 fn register_lock_screen(app: &AppWindow) {
@@ -121,12 +131,12 @@ fn unlock(app: &AppWindow) {
 
 // ── Command handling ──────────────────────────────────────────────────────────
 
-fn apply_cmd(app: &AppWindow, cmd: ControlCmd) {
+fn apply_cmd(app: &AppWindow, cmd: ControlCmd, event_pub: &EventPublisher) {
     match cmd {
-        ControlCmd::Arm    => { log::info!("Security: arm");    do_arm(app);   }
-        ControlCmd::Disarm => { log::info!("Security: disarm"); disarm(app);   }
-        ControlCmd::Silent => { log::info!("Security: silent"); app.set_security_alarm(false); }
-        ControlCmd::Alarm  => { log::info!("Security: alarm");  app.set_security_alarm(true);  }
+        ControlCmd::Arm    => { log::info!("Security: arm");    do_arm(app);                   event_pub.publish("armed"); }
+        ControlCmd::Disarm => { log::info!("Security: disarm"); disarm(app);                   event_pub.publish("disarmed"); }
+        ControlCmd::Silent => { log::info!("Security: silent"); app.set_security_alarm(false); event_pub.publish("alarm_silenced"); }
+        ControlCmd::Alarm  => { log::info!("Security: alarm");  app.set_security_alarm(true);  event_pub.publish("alarm"); }
     }
 }
 

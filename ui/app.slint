@@ -5,6 +5,7 @@ import { LogScreen, LogEntry }               from "log_screen.slint";
 import { MqttScreen }                        from "mqtt_screen.slint";
 import { LockScreen }                        from "lock_screen.slint";
 import { SettingsScreen }                    from "settings_screen.slint";
+import { SimScreen }                         from "sim_screen.slint";
 
 export { NetworkInfo }
 export { RcDeviceInfo }
@@ -82,6 +83,7 @@ export component AppWindow inherits Window {
     in-out property <string> mqtt-topic-disarm: "security/disarm";
     in-out property <string> mqtt-topic-silent: "security/silent";
     in-out property <string> mqtt-topic-alarm: "security/alarm";
+    in-out property <string> mqtt-topic-events: "security/events";
     in-out property <bool>   mqtt-connecting: false;
     in-out property <bool>   mqtt-is-connected: false;
     in-out property <string> mqtt-status: "Не подключено";
@@ -113,6 +115,18 @@ export component AppWindow inherits Window {
     callback settings-save-pin(string);
     callback settings-editing-delete-last();
 
+    // ── SIM state ────────────────────────────────────────────────
+    in-out property <string>   sim-msisdn:       "—";
+    in-out property <string>   sim-signal:       "—";
+    in-out property <string>   sim-reg:          "—";
+    in-out property <string>   sim-cpin:         "—";
+    in-out property <[string]> sim-whitelist;
+    in-out property <string>   sim-editing-text: "";
+
+    callback sim-whitelist-add(string);
+    callback sim-whitelist-remove(int);
+    callback sim-editing-delete-last();
+
     HorizontalLayout {
         // ── Sidebar ──────────────────────────────────────────────
         Rectangle {
@@ -136,6 +150,7 @@ export component AppWindow inherits Window {
                     { label: "RF"   },
                     { label: "Лог"  },
                     { label: "MQTT" },
+                    { label: "SIM"  },
                     { label: "Наст" },
                 ]: Rectangle {
                     height:        44px;
@@ -264,6 +279,7 @@ export component AppWindow inherits Window {
                 topic-disarm  <=> root.mqtt-topic-disarm;
                 topic-silent  <=> root.mqtt-topic-silent;
                 topic-alarm   <=> root.mqtt-topic-alarm;
+                topic-events  <=> root.mqtt-topic-events;
                 connecting    <=> root.mqtt-connecting;
                 is-connected  <=> root.mqtt-is-connected;
                 status        <=> root.mqtt-status;
@@ -278,8 +294,23 @@ export component AppWindow inherits Window {
                 editing-delete-last     => { root.mqtt-editing-delete-last(); }
             }
 
-            SettingsScreen {
+            SimScreen {
                 visible:              root.current-screen == 4;
+                width:                parent.width;
+                height:               parent.height;
+                msisdn            <=> root.sim-msisdn;
+                signal            <=> root.sim-signal;
+                reg               <=> root.sim-reg;
+                cpin              <=> root.sim-cpin;
+                whitelist         <=> root.sim-whitelist;
+                editing-text      <=> root.sim-editing-text;
+                whitelist-add(n)      => { root.sim-whitelist-add(n); }
+                whitelist-remove(i)   => { root.sim-whitelist-remove(i); }
+                editing-delete-last   => { root.sim-editing-delete-last(); }
+            }
+
+            SettingsScreen {
+                visible:              root.current-screen == 5;
                 width:                parent.width;
                 height:               parent.height;
                 pin               <=> root.settings-pin;

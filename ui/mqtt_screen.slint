@@ -76,6 +76,7 @@ export component MqttScreen {
     in-out property <string> topic-disarm:"security/disarm";
     in-out property <string> topic-silent:"security/silent";
     in-out property <string> topic-alarm: "security/alarm";
+    in-out property <string> topic-events:"security/events";
     in-out property <bool>   connecting;
     in-out property <bool>   is-connected;
     in-out property <string> status: "Не подключено";
@@ -87,7 +88,7 @@ export component MqttScreen {
     callback field-set(int, string);
     callback editing-delete-last();
 
-    // 0=none 1=host 2=port 3=user 4=pass 5=cid 6=arm 7=disarm 8=silent 9=alarm
+    // 0=none 1=host 2=port 3=user 4=pass 5=cid 6=arm 7=disarm 8=silent 9=alarm 10=events
     property <int> active-field: 0;
 
     MqttFontCoverage {}
@@ -170,7 +171,7 @@ export component MqttScreen {
             height: root.active-field > 0 ? content.height - 258px : content.height;
             interactive: true;
             viewport-width: self.width;
-            viewport-height: 580px;
+            viewport-height: 640px;
 
             VerticalLayout {
                 padding: 16px; spacing: 8px; alignment: start;
@@ -308,6 +309,19 @@ export component MqttScreen {
                     tapped => {
                         root.field-set(root.active-field, root.editing-text);
                         root.editing-text = root.topic-alarm; root.active-field = 9;
+                    }
+                }
+
+                // ── Топик событий ─────────────────────────────────────────────
+                Rectangle { height: 4px; }
+                Text { text: "ТОПИК СОБЫТИЙ"; color: #484f58; font-size: 11px; letter-spacing: 0.8px; }
+                MqttField {
+                    label: "События"; value: root.topic-events; placeholder: "security/events";
+                    live-value: root.active-field == 10 ? root.editing-text : "";
+                    active: root.active-field == 10;
+                    tapped => {
+                        root.field-set(root.active-field, root.editing-text);
+                        root.editing-text = root.topic-events; root.active-field = 10;
                     }
                 }
 

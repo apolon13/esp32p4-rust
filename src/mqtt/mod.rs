@@ -15,6 +15,7 @@ pub struct MqttTopics {
     pub disarm: String,
     pub silent: String,
     pub alarm:  String,
+    pub events: String,
 }
 
 #[derive(Clone, Debug)]
@@ -27,7 +28,22 @@ pub struct MqttConfig {
     pub topics:    MqttTopics,
 }
 
-pub enum MqttCmd { Connect(MqttConfig), Disconnect }
+pub enum MqttCmd { Connect(MqttConfig), Disconnect, Publish(String, String) }
+
+/// Позволяет публиковать события из любого места, не владея MqttWorker.
+#[derive(Clone)]
+pub struct EventPublisher {
+    cmd_tx: SyncSender<MqttCmd>,
+    topic:  Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl EventPublisher {
+    pub fn publish(&self, payload: &str) {
+        if let Some(topic) = self.topic.lock().unwrap().clone() {
+            let _ = self.cmd_tx.try_send(MqttCmd::Publish(topic, payload.to_owned()));
+        }
+    }
+}
 
 use crate::control::ControlCmd;
 
@@ -46,6 +62,7 @@ pub struct MqttWorker {
     event_rx:    Receiver<MqttEvent>,
     cancel_flag: Arc<AtomicBool>,
     nvs:         EspDefaultNvsPartition,
+    evt_topic:   Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl MqttWorker {
@@ -55,18 +72,24 @@ impl MqttWorker {
         let cancel_flag  = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel_flag.clone();
         let nvs_worker   = nvs.clone();
+        let evt_topic    = Arc::new(std::sync::Mutex::new(None::<String>));
+        let evt_topic_w  = Arc::clone(&evt_topic);
         std::thread::Builder::new()
             .stack_size(16384)
             .name("mqtt_worker".to_string())
-            .spawn(move || worker_loop(nvs_worker, cmd_rx, wifi_rx, event_tx, cancel_clone))
+            .spawn(move || worker_loop(nvs_worker, cmd_rx, wifi_rx, event_tx, cancel_clone, evt_topic_w))
             .expect("mqtt worker spawn failed");
-        Self { cmd_tx, event_rx, cancel_flag, nvs }
+        Self { cmd_tx, event_rx, cancel_flag, nvs, evt_topic }
     }
 
-    pub fn try_recv(&self)                   -> Option<MqttEvent>     { self.event_rx.try_recv().ok() }
-    pub fn cmd_sender(&self)                 -> SyncSender<MqttCmd>   { self.cmd_tx.clone() }
-    pub fn cancel_flag(&self)                -> Arc<AtomicBool>       { self.cancel_flag.clone() }
-    pub fn saved_config(&self)               -> Option<MqttConfig>    { load_config(&self.nvs) }
+    pub fn try_recv(&self)    -> Option<MqttEvent>   { self.event_rx.try_recv().ok() }
+    pub fn cmd_sender(&self)  -> SyncSender<MqttCmd> { self.cmd_tx.clone() }
+    pub fn cancel_flag(&self) -> Arc<AtomicBool>     { self.cancel_flag.clone() }
+    pub fn saved_config(&self)-> Option<MqttConfig>  { load_config(&self.nvs) }
+
+    pub fn event_publisher(&self) -> EventPublisher {
+        EventPublisher { cmd_tx: self.cmd_tx.clone(), topic: Arc::clone(&self.evt_topic) }
+    }
 }
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -81,16 +104,17 @@ struct SessionData {
 }
 
 fn worker_loop(
-    nvs:     EspDefaultNvsPartition,
-    cmd_rx:  Receiver<MqttCmd>,
-    wifi_rx: Receiver<bool>,
-    evt_tx:  SyncSender<MqttEvent>,
-    cancel:  Arc<AtomicBool>,
+    nvs:       EspDefaultNvsPartition,
+    cmd_rx:    Receiver<MqttCmd>,
+    wifi_rx:   Receiver<bool>,
+    evt_tx:    SyncSender<MqttEvent>,
+    cancel:    Arc<AtomicBool>,
+    evt_topic: Arc<std::sync::Mutex<Option<String>>>,
 ) {
     loop {
         match disconnected_loop(&nvs, &cmd_rx, &wifi_rx, &evt_tx, &cancel) {
             None     => return,
-            Some(sd) => { if !connected_loop(sd, &cmd_rx, &wifi_rx, &evt_tx) { return; } }
+            Some(sd) => { if !connected_loop(sd, &cmd_rx, &wifi_rx, &evt_tx, &evt_topic) { return; } }
         }
     }
 }
@@ -116,6 +140,7 @@ fn disconnected_loop(
                 if let Some(sd) = do_connect(cfg, cancel, evt_tx) { return Some(sd); }
             }
             Ok(MqttCmd::Disconnect)             => {}
+            Ok(MqttCmd::Publish(_, _))          => {}
             Err(RecvTimeoutError::Disconnected) => return None,
             Err(RecvTimeoutError::Timeout)      => {}
         }
@@ -123,23 +148,32 @@ fn disconnected_loop(
 }
 
 fn connected_loop(
-    sd:      SessionData,
-    cmd_rx:  &Receiver<MqttCmd>,
-    wifi_rx: &Receiver<bool>,
-    evt_tx:  &SyncSender<MqttEvent>,
+    sd:        SessionData,
+    cmd_rx:    &Receiver<MqttCmd>,
+    wifi_rx:   &Receiver<bool>,
+    evt_tx:    &SyncSender<MqttEvent>,
+    evt_topic: &Arc<std::sync::Mutex<Option<String>>>,
 ) -> bool {
-    let SessionData { client: _client, config, msg_rx, disc_rx } = sd;
-    loop {
-        if disc_rx.try_recv().is_ok()  { return send_disc(evt_tx); }
-        if check_wifi_down(wifi_rx)    { return send_disc(evt_tx); }
+    let SessionData { mut client, config, msg_rx, disc_rx } = sd;
+    *evt_topic.lock().unwrap() = Some(config.topics.events.clone());
+    let result = loop {
+        if disc_rx.try_recv().is_ok() { break send_disc(evt_tx); }
+        if check_wifi_down(wifi_rx)   { break send_disc(evt_tx); }
         while let Ok(msg) = msg_rx.try_recv() { handle_message(&msg, &config, evt_tx); }
         match cmd_rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(MqttCmd::Disconnect)             => return send_disc(evt_tx),
-            Ok(MqttCmd::Connect(_))             => {}
-            Err(RecvTimeoutError::Disconnected) => return false,
-            Err(RecvTimeoutError::Timeout)      => {}
+            Ok(MqttCmd::Disconnect)              => break send_disc(evt_tx),
+            Ok(MqttCmd::Connect(_))              => {}
+            Ok(MqttCmd::Publish(topic, payload)) => {
+                if !topic.is_empty() {
+                    let _ = client.publish(&topic, QoS::AtMostOnce, false, payload.as_bytes());
+                }
+            }
+            Err(RecvTimeoutError::Disconnected)  => break false,
+            Err(RecvTimeoutError::Timeout)       => {}
         }
-    }
+    };
+    *evt_topic.lock().unwrap() = None;
+    result
 }
 
 fn check_wifi_down(wifi_rx: &Receiver<bool>) -> bool {
@@ -284,6 +318,7 @@ fn save_config(nvs: &EspDefaultNvsPartition, cfg: &MqttConfig) {
     let _ = h.set_str("t_dis", &cfg.topics.disarm);
     let _ = h.set_str("t_sil", &cfg.topics.silent);
     let _ = h.set_str("t_alm", &cfg.topics.alarm);
+    let _ = h.set_str("t_evt", &cfg.topics.events);
 }
 
 fn load_config(nvs: &EspDefaultNvsPartition) -> Option<MqttConfig> {
@@ -305,7 +340,8 @@ fn load_topics(h: &EspNvs<NvsDefault>) -> MqttTopics {
     let disarm = get_str(h, "t_dis", &mut buf, "security/disarm");
     let silent = get_str(h, "t_sil", &mut buf, "security/silent");
     let alarm  = get_str(h, "t_alm", &mut buf, "security/alarm");
-    MqttTopics { arm, disarm, silent, alarm }
+    let events = get_str(h, "t_evt", &mut buf, "security/events");
+    MqttTopics { arm, disarm, silent, alarm, events }
 }
 
 fn get_str(h: &EspNvs<NvsDefault>, key: &str, buf: &mut [u8], default: &str) -> String {
